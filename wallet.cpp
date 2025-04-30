@@ -112,7 +112,9 @@ class Blockchain {
     
         // Validates blockchain's integrity
         bool isChainValid() const {
+            //iterate through each block starting from the second one(index 1 )
             for (size_t i = 1; i < chain.size(); ++i) {
+                 // Get the current block and the previous block
                 const Block& current = chain[i];
                 const Block& previous = chain[i - 1];
     
@@ -165,7 +167,7 @@ public:
             withdraw(amount);
             other.deposit(amount);
 
-            // ⚠️ Each wallet keeps its own copy of the transaction for record-keeping
+            //  Each wallet keeps its own copy of the transaction for record-keeping
             transactions.emplace_back(ownerName, other.getName(), amount); //  Copy overhead — consider lightweight TX objects or TX IDs only
             other.transactions.emplace_back(ownerName, other.getName(), amount);
 
