@@ -124,12 +124,8 @@ Aspiring Quant Developer & Systems Engineer
 ## 📬 Contact
 
 - Email: [your.email@example.com](mailto:your.email@example.com)
-- GitHub: [github.com/YahyaMohamed3](https://github.com/yourusername)
-- LinkedIn: [linkedin.com/in/yahya-mohamed-798688275
-
-](https://linkedin.com/in/yahya-mohamed-798688275
-
-)
+- GitHub: [github.com/YahyaMohamed](https://github.com/yourusername)
+- LinkedIn: [linkedin.com/in/yourusername](https://linkedin.com/in/yourusername)
 
 ## 🔗 References
 
