@@ -124,31 +124,10 @@ public:
     }
 };
 
-
 int main() {
     Wallet w1("Alice");
     Wallet w2("Bob");
 
     w1.deposit(100);
-    w2.deposit(50);
-
-    w1.transfer(w2, 30); //  Wallet-to-wallet transfer is atomic here (no rollback or intermediate failure handling).
-    w2.transfer(w1, 20);
-
-    std::cout << "\nAlice's Transactions:\n";
-    w1.displayTransactions();
-
-    std::cout << "\nBob's Transactions:\n";
-    w2.displayTransactions();
-
-    // ⛓ Combine transactions into a block
-    std::vector<Transaction> blockTransactions = w1.getTransactions(); //  Reuse existing TXs — copied here, be mindful of cost in scale
-    const auto& w2Transactions = w2.getTransactions();
-    blockTransactions.insert(blockTransactions.end(), w2Transactions.begin(), w2Transactions.end()); //  Vector insert might reallocate — consider pre-sizing if known
-
-    Block b1(1, "0", blockTransactions); //  Block 1, genesis has "0" as previous hash
-    std::cout << "\nBlock Details:\n";
-    b1.printBlock();
-
-    return 0;
+    w2.deposit(100);
 }
