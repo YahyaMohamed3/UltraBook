@@ -52,6 +52,10 @@ public:
         : index(idx), previousHash(prehash), transactions(tsx), nonce(0), timestamp(std::chrono::system_clock::now()) {
         currentHash = calculateHash(); // ⏱ Critical for block integrity: must happen after all block contents are set.
     }
+    int getIndex() const { return index; }
+    std::string getHash() const { return currentHash; }
+    std::string getPreviousHash() const { return previousHash; }
+
 
     std::string calculateHash() const {
         std::stringstream ss;
@@ -75,6 +79,61 @@ public:
         }
     }
 };
+
+class Blockchain {
+    private:
+        std::vector<Block> chain;
+    
+        // Creates the first block in the blockchain
+        Block createGenesisBlock() {
+            std::vector<Transaction> genesisTxs; // empty or predefined
+            return Block(0, "0", genesisTxs);     // index 0, prevHash = "0"
+        }
+    
+    public:
+        // Constructor
+        Blockchain() {
+            chain.push_back(createGenesisBlock());
+        }
+    
+        // Add new block with given transactions
+        void addBlock(const std::vector<Transaction>& transactions) {
+            Block latestBlock = getLatestBlock();
+            int newIndex = latestBlock.getIndex() + 1;
+            std::string prevHash = latestBlock.getHash();
+            Block newBlock(newIndex, prevHash, transactions);
+            chain.push_back(newBlock);
+        }
+    
+        // Returns the latest block
+        Block getLatestBlock() const {
+            return chain.back();
+        }
+    
+        // Validates blockchain's integrity
+        bool isChainValid() const {
+            for (size_t i = 1; i < chain.size(); ++i) {
+                const Block& current = chain[i];
+                const Block& previous = chain[i - 1];
+    
+                if (current.getHash() != current.calculateHash())
+                    return false;
+    
+                if (current.getPreviousHash() != previous.getHash())
+                    return false;
+            }
+            return true;
+        }
+    
+        // Print the entire chain
+        void printChain() const {
+            for (const Block& block : chain) {
+                block.printBlock();
+                std::cout << "-----------------------\n";
+            }
+        }
+    };
+
 
 // Wallet class to manage transactions and balance
 class Wallet {
@@ -124,10 +183,4 @@ public:
     }
 };
 
-int main() {
-    Wallet w1("Alice");
-    Wallet w2("Bob");
 
-    w1.deposit(100);
-    w2.deposit(100);
-}
