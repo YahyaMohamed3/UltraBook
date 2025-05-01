@@ -121,7 +121,7 @@ void MatchingEngine::matchOrders() {
                 orderMap.erase(buyOrder.orderId);
                 buyQueue.pop_front();
                 
-                // If no more orders at this price, remove the price level
+                // If no more Buy orders at this price, remove the price level
                 if (buyQueue.empty()) {
                     buyOrders.erase(buyOrders.begin());
                 }
@@ -131,7 +131,7 @@ void MatchingEngine::matchOrders() {
                 orderMap.erase(sellOrder.orderId);
                 sellQueue.pop_front();
                 
-                // If no more orders at this price, remove the price level
+                // If no more Sell orders at this price, remove the price level
                 if (sellQueue.empty()) {
                     sellOrders.erase(sellOrders.begin());
                 }
