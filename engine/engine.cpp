@@ -15,7 +15,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price , int quantity , b
              <<", Qty: "<<quantity
              <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
     
-    Order newOrder = {orderId, price, quantity, isBuy};
+    Order newOrder (orderId, price, quantity, isBuy);
 
     if(isBuy){
         buyOrders[price].push_back(newOrder);
@@ -27,6 +27,15 @@ void MatchingEngine::addLimitOrder(int orderId , double price , int quantity , b
     }
 }
 
+
+void MatchingEngine::addMarketOrder(){
+
+
+
+
+
+
+}
 
 void MatchingEngine::cancelOrder(int orderId) {
     auto it = orderMap.find(orderId);
@@ -111,6 +120,10 @@ void MatchingEngine::matchOrders() {
                       << " matched with SellOrder " << sellOrder.orderId
                       << " at price " << lowestSellPrice
                       << " for quantity " << tradeQty << std::endl;
+
+            Trade trade(buyOrder.orderId , sellOrder.orderId, lowestSellPrice , tradeQty);
+            tradeLog.push_back(trade)
+            
             
             // Update order quantities
             buyOrder.quantity -= tradeQty;
