@@ -27,15 +27,8 @@ void MatchingEngine::addLimitOrder(int orderId , double price , int quantity , b
     }
 }
 
-
-void MatchingEngine::addMarketOrder(){
-
-
-
-
-
-
-}
+//implement market order 
+//print trade log
 
 void MatchingEngine::cancelOrder(int orderId) {
     auto it = orderMap.find(orderId);
