@@ -122,8 +122,10 @@ void MatchingEngine::matchOrders() {
                       << " for quantity " << tradeQty << std::endl;
 
             Trade trade(buyOrder.orderId , sellOrder.orderId, lowestSellPrice , tradeQty);
-            tradeLog.push_back(trade)
-            
+            tradeLog.push_back(trade);
+            tradesByOrderId[buyOrder.orderId].push_back(trade);
+            tradesByOrderId[sellOrder.orderId].push_back(trade);
+
             
             // Update order quantities
             buyOrder.quantity -= tradeQty;
