@@ -10,6 +10,16 @@ MatchingEngine::MatchingEngine() {
 
 //Add limit order to the book 
 void MatchingEngine::addLimitOrder(int orderId , double price , int quantity , bool isBuy){
+    if (quantity <= 0) {
+        std::cerr << "Invalid order: Quantity must be greater than zero." << std::endl;
+        return;  // Reject the order
+    }
+
+    if (price <= 0) {
+        std::cerr << "Invalid order: Price must be greater than zero." << std::endl;
+        return;  // Reject the order
+    }
+
     std::cout<<"[addLimitOrder] OrderId: "<< orderId
              <<", price: "<< price
              <<", Qty: "<<quantity
