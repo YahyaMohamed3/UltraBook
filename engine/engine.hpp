@@ -16,7 +16,7 @@ public:
     void addMarketOrder(int orderId, int qunatity, bool isBuy);
     void cancelOrder(int orderId);
     void printOrderBook() const;
-    void printTradelog() const;
+    void printTradelog();
     void matchOrders();
 
 private:
