@@ -77,7 +77,7 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
         }
     } else {
         // Match against best buy orders (highest price)
-        while(quantity > 0 && buyOrders.empty()){
+        while(quantity > 0 && ! buyOrders.empty()){
             auto it = buyOrders.begin();
             auto& buyQueue = it->second;
             Order& buyOrder = buyQueue.front();
@@ -88,6 +88,9 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
                      <<" matched with "<<buyOrder.orderId
                      <<" at price"<<tradePrice
                      <<" for Qty "<<tradeQty<<std::endl;
+
+            quantity -= tradeQty;
+            buyOrder.quantity -= tradeQty;
 
             Trade trade(orderId , buyOrder.orderId , tradePrice, tradeQty);
             tradesByOrderId[orderId].push_back(trade);
