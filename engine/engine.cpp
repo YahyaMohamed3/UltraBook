@@ -31,7 +31,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
     }
     else{
         sellOrders[price].push_back(newOrder);
-        orderMap[orderId] = &buyOrders[price].back();
+        orderMap[orderId] = &sellOrders[price].back();
     }
 
 }
