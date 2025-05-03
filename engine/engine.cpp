@@ -28,6 +28,27 @@ void MatchingEngine::addLimitOrder(int orderId , double price , int quantity , b
 }
 
 //implement market order 
+void MatchingEngine::addMarketOrder(int orderId , int quantity , bool isBuy){
+    std::cout<<"[Market Order] OrderID: "<< orderId
+             <<", quantity: "<<quantity
+             <<", Side: "<<(isBuy ? "Buy": "Sell")<< std::endl;
+    
+    if(isBuy){
+        for(auto it; )
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+}
 //print trade log
 
 void MatchingEngine::cancelOrder(int orderId) {

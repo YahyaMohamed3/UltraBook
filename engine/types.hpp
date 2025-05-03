@@ -4,10 +4,16 @@
 
 
 #include<chrono>
+#include<optional>
+enum class OrderType{
+    LIMIT, 
+    MARKET
+
+};
 
 struct Order {
     int orderId;
-    double price;
+    std::optional<double> price;
     int quantity;
     bool isBuy;
     std::chrono::high_resolution_clock::time_point timestamp;
