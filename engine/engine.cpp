@@ -15,7 +15,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
         return;
     }
     if(price <= 0){
-        std::cerr <<"Invalid order: Price must be bigger than 0"<<std::endl:
+        std::cerr <<"Invalid order: Price must be bigger than 0"<<std::endl;
         return;
     }
     std::cout<<"[addLimitOrder] OrderID: "<<orderId
@@ -93,6 +93,7 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
             buyOrder.quantity -= tradeQty;
 
             Trade trade(orderId , buyOrder.orderId , tradePrice, tradeQty);
+            tradeLog.push_back(trade);
             tradesByOrderId[orderId].push_back(trade);
             tradesByOrderId[buyOrder.orderId].push_back(trade);
 
@@ -128,7 +129,7 @@ void MatchingEngine::cancelOrder(int orderId) {
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
             if (orderQueue.empty()){
-                orderQueue.erase(order.price.value());
+                buyOrders.erase(order.price.value());
                     }
         } else {
             // Remove from sellOrders map
@@ -137,7 +138,7 @@ void MatchingEngine::cancelOrder(int orderId) {
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
                 if(orderQueue.empty()){
-                    orderQueue.erase(order.price.value());
+                    sellOrders.erase(order.price.value());
                     }
         }
         orderMap.erase(it);
