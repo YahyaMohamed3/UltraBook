@@ -15,7 +15,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
         return;
     }
     if(price <= 0){
-        std::cerr <<"Invalid order: Price must be bigger than 0";
+        std::cerr <<"Invalid order: Price must be bigger than 0"<<std::endl:
         return;
     }
     std::cout<<"[addLimitOrder] OrderID: "<<orderId
