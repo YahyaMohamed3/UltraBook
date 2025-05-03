@@ -127,12 +127,18 @@ void MatchingEngine::cancelOrder(int orderId) {
             orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
+            if (orderQueue.empty()){
+                orderQueue.erase(order.price.value());
+                    }
         } else {
             // Remove from sellOrders map
             auto& orderQueue = sellOrders[order->price.value()];
             orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
+                if(orderQueue.empty()){
+                    orderQueue.erase(order.price.value());
+                    }
         }
         orderMap.erase(it);
         std::cout << "[cancelOrder] OrderID: " << orderId << " has been canceled." << std::endl;
