@@ -129,7 +129,11 @@ void MatchingEngine::cancelOrder(int orderId) {
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
             if (orderQueue.empty()){
+<<<<<<< HEAD
                 buyOrders.erase(order->price.value());
+=======
+                buyOrders.erase(order.price.value());
+>>>>>>> 4d2a0797f39a5f0abeb4bd27bc6c3afcfdd1bd1f
                     }
         } else {
             // Remove from sellOrders map
@@ -138,7 +142,11 @@ void MatchingEngine::cancelOrder(int orderId) {
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
                 if(orderQueue.empty()){
+<<<<<<< HEAD
                     sellOrders.erase(order->price.value());
+=======
+                    sellOrders.erase(order.price.value());
+>>>>>>> 4d2a0797f39a5f0abeb4bd27bc6c3afcfdd1bd1f
                     }
         }
         orderMap.erase(it);
