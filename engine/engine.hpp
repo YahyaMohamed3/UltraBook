@@ -5,6 +5,7 @@
 
 #include <map>
 #include <deque>
+#include <vector>
 #include <unordered_map>
 #include "types.hpp"
 

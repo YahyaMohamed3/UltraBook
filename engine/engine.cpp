@@ -15,7 +15,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
         return;
     }
     if(price <= 0){
-        std::cerr <<"Invalid order: Price must be bigger than 0";
+        std::cerr <<"Invalid order: Price must be bigger than 0"<<std::endl;
         return;
     }
     std::cout<<"[addLimitOrder] OrderID: "<<orderId
@@ -31,7 +31,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
     }
     else{
         sellOrders[price].push_back(newOrder);
-        orderMap[orderId] = &buyOrders[price].back();
+        orderMap[orderId] = &sellOrders[price].back();
     }
 
 }
@@ -77,7 +77,7 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
         }
     } else {
         // Match against best buy orders (highest price)
-        while(quantity > 0 && buyOrders.empty()){
+        while(quantity > 0 && ! buyOrders.empty()){
             auto it = buyOrders.begin();
             auto& buyQueue = it->second;
             Order& buyOrder = buyQueue.front();
@@ -89,7 +89,11 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
                      <<" at price"<<tradePrice
                      <<" for Qty "<<tradeQty<<std::endl;
 
+            quantity -= tradeQty;
+            buyOrder.quantity -= tradeQty;
+
             Trade trade(orderId , buyOrder.orderId , tradePrice, tradeQty);
+            tradeLog.push_back(trade);
             tradesByOrderId[orderId].push_back(trade);
             tradesByOrderId[buyOrder.orderId].push_back(trade);
 
@@ -124,12 +128,18 @@ void MatchingEngine::cancelOrder(int orderId) {
             orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
+            if (orderQueue.empty()){
+                buyOrders.erase(order->price.value());
+                    }
         } else {
             // Remove from sellOrders map
             auto& orderQueue = sellOrders[order->price.value()];
             orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
+                if(orderQueue.empty()){
+                    sellOrders.erase(order->price.value());
+                    }
         }
         orderMap.erase(it);
         std::cout << "[cancelOrder] OrderID: " << orderId << " has been canceled." << std::endl;
