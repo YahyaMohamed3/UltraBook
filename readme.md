@@ -58,6 +58,14 @@ market-sim/
 
 (comin soon )
 
+### Order Status Meanings:
+- ACTIVE: Order is in the order book waiting to be matched
+- INACTIVE: Order is not yet eligible for matching (e.g., stop order waiting for trigger)
+- TRIGGERED: Stop order that has been activated and moved to regular order book
+- CANCELED: Order was canceled before complete execution
+- FILLED: Order was completely executed
+- PARTIALLY_FILLED: Order was partially executed but remaining quantity exists
+
 ## 📉 Trading Strategy Framework
 
 The platform includes a framework for implementing and testing trading strategies:
