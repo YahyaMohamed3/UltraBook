@@ -1,12 +1,11 @@
-#include "Engine.hpp"
+#include "engine.hpp"
 #include <iostream>
 #include <algorithm> 
+#include "types.hpp"
 
 namespace ultraBook{
 
-MatchingEngine::MatchingEngine() {
-    // Initialize internal data structures
-}
+MatchingEngine::MatchingEngine() = default;
 
 //Add limit order to the book 
 void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bool isBuy){
@@ -15,7 +14,7 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
         return;
     }
     if(price <= 0){
-        std::cerr <<"Invalid order: Price must be bigger than 0"<<std::endl;
+        std::cerr <<"Invalid order: Price must be bigger than 0" << std::endl;
         return;
     }
     std::cout<<"[addLimitOrder] OrderID: "<<orderId
@@ -23,23 +22,24 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
              <<" , Qty: "<<quantity
              <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
     
-    Order newOrder(orderId , std::optional<double>{price}, quantity, isBuy, OrderType::LIMIT);
+    Order newOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::LIMIT);
 
     if(isBuy){
         buyOrders[price].push_back(newOrder);
-        orderMap[orderId] = &buyOrders[price].back();
+        auto& orderQueue = buyOrders[price];
+        orderMap[orderId] = &orderQueue.back();
     }
     else{
         sellOrders[price].push_back(newOrder);
-        orderMap[orderId] = &sellOrders[price].back();
+        auto& orderQueue = sellOrders[price];
+        orderMap[orderId] = &orderQueue.back();
     }
-
 }
 
 //implement market order 
 void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
-    if(quantity <= 0 ){
-        std::cerr<<"Invalid order: Qty must be bigger than 0.";
+    if(quantity <= 0) {
+        std::cerr << "Invalid order: Qty must be bigger than 0." << std::endl;
         return;
     }
 
@@ -47,21 +47,22 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
               << ", quantity: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
 
+    Order marketOrder(orderId, std::nullopt, quantity, isBuy, OrderType::MARKET);
+
     if (isBuy) {
         // Match against best sell orders (lowest price)
-        while(quantity > 0 && ! sellOrders.empty()){
-            auto it = sellOrders.begin();
-            auto& sellQueue = it->second;
+        while(quantity > 0 && !sellOrders.empty()) {
+            auto& sellQueue = sellOrders.begin()->second;
             Order& sellOrder = sellQueue.front();
 
-            int tradeQty = std::min(quantity , sellOrder.quantity);
-            double tradePrice = it->first;
+            int tradeQty = std::min(quantity, sellOrder.quantity);
+            double tradePrice = sellOrders.begin()->first;
             std::cout<<"[Market Buy] OrderID: "<<orderId
                      <<" matched with SellOrder "<<sellOrder.orderId
                      <<" at price "<<tradePrice
                      <<" for Qty "<< tradeQty<<std::endl;
 
-            Trade trade(orderId , sellOrder.orderId , tradePrice, tradeQty);
+            Trade trade(orderId, sellOrder.orderId, tradePrice, tradeQty);
             tradeLog.push_back(trade);
             tradesByOrderId[orderId].push_back(trade);
             tradesByOrderId[sellOrder.orderId].push_back(trade);
@@ -69,40 +70,38 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
             quantity -= tradeQty;
             sellOrder.quantity -= tradeQty;
 
-            if(sellOrder.quantity == 0){
+            if(sellOrder.quantity == 0) {
                 orderMap.erase(sellOrder.orderId);
                 sellQueue.pop_front();
-                if(sellQueue.empty()) sellOrders.erase(it);
+                if(sellQueue.empty()) sellOrders.erase(sellOrders.begin());
             }
         }
     } else {
         // Match against best buy orders (highest price)
-        while(quantity > 0 && ! buyOrders.empty()){
-            auto it = buyOrders.begin();
-            auto& buyQueue = it->second;
+        while(quantity > 0 && !buyOrders.empty()) {
+            auto& buyQueue = buyOrders.begin()->second;
             Order& buyOrder = buyQueue.front();
 
-            int tradeQty = std::min(quantity , buyOrder.quantity);
-            double tradePrice = it->first;
+            int tradeQty = std::min(quantity, buyOrder.quantity);
+            double tradePrice = buyOrders.begin()->first;
             std::cout<<"Match [Market Sell] OrderID: "<<orderId
                      <<" matched with "<<buyOrder.orderId
-                     <<" at price"<<tradePrice
+                     <<" at price "<<tradePrice
                      <<" for Qty "<<tradeQty<<std::endl;
 
-            quantity -= tradeQty;
-            buyOrder.quantity -= tradeQty;
-
-            Trade trade(orderId , buyOrder.orderId , tradePrice, tradeQty);
+            Trade trade(buyOrder.orderId, orderId, tradePrice, tradeQty);
             tradeLog.push_back(trade);
             tradesByOrderId[orderId].push_back(trade);
             tradesByOrderId[buyOrder.orderId].push_back(trade);
 
-            if(buyOrder.quantity == 0){
+            quantity -= tradeQty;
+            buyOrder.quantity -= tradeQty;
+
+            if(buyOrder.quantity == 0) {
                 orderMap.erase(buyOrder.orderId);
                 buyQueue.pop_front();
-                if(buyQueue.empty())buyOrders.erase(it);
+                if(buyQueue.empty()) buyOrders.erase(buyOrders.begin());
             }
-
         }
     }
 
@@ -128,26 +127,12 @@ void MatchingEngine::cancelOrder(int orderId) {
             orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
-            if (orderQueue.empty()){
-<<<<<<< HEAD
-                buyOrders.erase(order->price.value());
-=======
-                buyOrders.erase(order.price.value());
->>>>>>> 4d2a0797f39a5f0abeb4bd27bc6c3afcfdd1bd1f
-                    }
         } else {
             // Remove from sellOrders map
             auto& orderQueue = sellOrders[order->price.value()];
             orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
                                            [orderId](const Order& o) { return o.orderId == orderId; }),
                            orderQueue.end());
-                if(orderQueue.empty()){
-<<<<<<< HEAD
-                    sellOrders.erase(order->price.value());
-=======
-                    sellOrders.erase(order.price.value());
->>>>>>> 4d2a0797f39a5f0abeb4bd27bc6c3afcfdd1bd1f
-                    }
         }
         orderMap.erase(it);
         std::cout << "[cancelOrder] OrderID: " << orderId << " has been canceled." << std::endl;
@@ -167,8 +152,8 @@ void MatchingEngine::printOrderBook() const {
             std::cout<<"(OrderID "<<order.orderId << ", "<< order.quantity<< " shares) ";
         }
         std::cout <<std::endl;
-
     }
+    
     // Print buy orders (highest to lowest)
     std::cout<<"BUY ORDERS"<<std::endl;
     for(const auto& [price , orders] : buyOrders){
@@ -190,25 +175,22 @@ void MatchingEngine::matchOrders() {
     while (matchFound) {
         matchFound = false; 
         
-        // Check if there are any buy and sell orders
         if (buyOrders.empty() || sellOrders.empty()) {
             break;
         }
         
-        // Get the highest buy price and lowest sell price
         double highestBuyPrice = buyOrders.begin()->first;
         double lowestSellPrice = sellOrders.begin()->first;
         
-        // If highest buy price >= lowest sell price, we have a match
         if (highestBuyPrice >= lowestSellPrice) {
-            auto& buyQueue = buyOrders.begin()->second;
-            auto& sellQueue = sellOrders.begin()->second;
+            auto buyIt = buyOrders.begin();
+            auto sellIt = sellOrders.begin();
+            auto& buyQueue = buyIt->second;
+            auto& sellQueue = sellIt->second;
             
-            // Get the first orders in the queue (oldest at that price)
             Order& buyOrder = buyQueue.front();
             Order& sellOrder = sellQueue.front();
             
-            // Calculate trade quantity
             int tradeQty = std::min(buyOrder.quantity, sellOrder.quantity);
             
             std::cout << "[MATCH] BuyOrder " << buyOrder.orderId 
@@ -216,41 +198,33 @@ void MatchingEngine::matchOrders() {
                       << " at price " << lowestSellPrice
                       << " for quantity " << tradeQty << std::endl;
 
-            Trade trade(buyOrder.orderId , sellOrder.orderId, lowestSellPrice , tradeQty);
+            Trade trade(buyOrder.orderId, sellOrder.orderId, lowestSellPrice, tradeQty);
             tradeLog.push_back(trade);
             tradesByOrderId[buyOrder.orderId].push_back(trade);
             tradesByOrderId[sellOrder.orderId].push_back(trade);
-
             
-            // Update order quantities
             buyOrder.quantity -= tradeQty;
             sellOrder.quantity -= tradeQty;
             
-            // Remove filled orders
             if (buyOrder.quantity == 0) {
                 orderMap.erase(buyOrder.orderId);
                 buyQueue.pop_front();
-                
-                // If no more Buy orders at this price, remove the price level
-                if (buyQueue.empty()) {
-                    buyOrders.erase(buyOrders.begin());
+                if(buyQueue.empty()) {
+                    buyOrders.erase(buyIt);
                 }
             }
             
             if (sellOrder.quantity == 0) {
                 orderMap.erase(sellOrder.orderId);
                 sellQueue.pop_front();
-                
-                // If no more Sell orders at this price, remove the price level
-                if (sellQueue.empty()) {
-                    sellOrders.erase(sellOrders.begin());
+                if(sellQueue.empty()) {
+                    sellOrders.erase(sellIt);
                 }
             }
             
             matchFound = true;
         } else {
-            // No matches possible
-            break;
+            break;  // No matches possible at current price levels
         }
     }
     

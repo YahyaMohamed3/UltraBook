@@ -18,11 +18,12 @@ struct Order {
     std::optional<double> price;
     int quantity;
     bool isBuy;
+    OrderType type;
     std::chrono::high_resolution_clock::time_point timestamp;
 
-    Order(int id, std::optional<double> p, int q, bool side, OrderType type)
-        : orderId(id) , price(p), quantity(q), isBuy(side),
-        timestamp(std::chrono::high_resolution_clock::now()){}
+    Order(int id, std::optional<double> p, int q, bool side, OrderType orderType)
+        : orderId(id), price(p), quantity(q), isBuy(side), type(orderType),
+        timestamp(std::chrono::high_resolution_clock::now()) {}
 
 };
 

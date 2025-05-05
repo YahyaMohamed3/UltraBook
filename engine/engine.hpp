@@ -14,7 +14,7 @@ class MatchingEngine {
 public:
     MatchingEngine();
     void addLimitOrder(int orderId, double price, int quantity, bool isBuy);
-    void addMarketOrder(int orderId, int qunatity, bool isBuy);
+    void addMarketOrder(int orderId, int quantity, bool isBuy);
     void cancelOrder(int orderId);
     void printOrderBook() const;
     void printTradelog();
