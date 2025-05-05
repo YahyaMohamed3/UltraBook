@@ -40,7 +40,7 @@ struct Trade{
           timestamp(std::chrono::high_resolution_clock::now()) {}
 };
 
-std::ostream& operator<<(std::ostream& os, const Trade& t) {
+inline std::ostream& operator<<(std::ostream& os, const Trade& t) {
     auto ms = std::chrono::duration_cast<std::chrono::microseconds>(t.timestamp.time_since_epoch()).count();
     os << "Trade | BuyID: " << t.buyOrderId
        << ", SellID: " << t.sellOrderId
