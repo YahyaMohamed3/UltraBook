@@ -56,10 +56,7 @@ market-sim/
 
 ## 📊 Performance Metrics
 
-- **Order processing**: >1M orders/second on consumer hardware
-- **Matching latency**: <500ns average, <2μs 99.9th percentile
-- **Memory footprint**: <100MB for full simulation environment
-- **Order book updates**: >5M updates/second with full depth tracking
+(comin soon )
 
 ## 📉 Trading Strategy Framework
 
