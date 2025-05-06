@@ -33,6 +33,26 @@ int main() {
     engine.addMarketOrder(12, 10, false);      // Market sell, tests FIFO match
     engine.printTradelog();
 
+    std::cout << "\n---- TEST 6: Cancel Order ----\n";
+    engine.addLimitOrder(13, 99.0, 5, true);
+    std::cout << "Before Cancel:\n";
+    engine.printOrderBook();
+    engine.cancelOrder(13);
+    std::cout << "After Cancel:\n";
+    engine.printOrderBook();
+
+    std::cout << "\n---- TEST 7: Market Order with No Matches ----\n";
+    engine.addMarketOrder(14, 10, true);  // Should print "no matches available"
+
+    std::cout << "\n---- TEST 8: Order Status Check ----\n";
+    engine.addLimitOrder(15, 100.0, 5, true);
+    auto status = engine.getOrderStatus(15);
+    std::cout << "Order 15 Status: " << status << std::endl;
+    
+    engine.addMarketOrder(16, 5, false);  // Should fill order 15
+    status = engine.getOrderStatus(15);
+    std::cout << "Order 15 Status after fill: " << status << std::endl;
+
     std::cout << "\n---- FINAL ORDER BOOK STATE ----\n";
     engine.printOrderBook();
 

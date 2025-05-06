@@ -8,6 +8,7 @@
 #include <vector>
 #include <unordered_map>
 #include "types.hpp"
+#include<chrono>
 
 namespace ultraBook{
 class MatchingEngine {
@@ -15,10 +16,18 @@ public:
     MatchingEngine();
     void addLimitOrder(int orderId, double price, int quantity, bool isBuy);
     void addMarketOrder(int orderId, int quantity, bool isBuy);
+    void addGTCOrder(int orderId, double price, int quantity, bool isBuy);
+    void addGTDOrder(int orderId, double price, int quantity, bool isBuy, std::chrono::system_clock::time_point expiry);
+    void addStopOrder(int orderId, double stopPrice, int quantity, bool isBuy);
+    void addStopLimitOrder(int orderId, double stopPrice, double limitPrice, int quantity, bool isBuy);
+    void addIOCOrder(int orderId, double price, int quantity, bool isBuy);
+    void addFOKOrder(int orderId, double price, int quantity, bool isBuy);
+    void addIcebergOrder(int orderId, double price, int totalQuantity, int visibleQuantity, bool isBuy);
     void cancelOrder(int orderId);
     void printOrderBook() const;
     void printTradelog();
     void matchOrders();
+    void setOrderStatus(Order* order, OrderStatus newStatus);
 
 private:
     // Internal data structures for buy/sell order books
@@ -28,7 +37,7 @@ private:
     // Order ID to order pointer (for fast lookup/cancel)
     std::unordered_map<int, Order*> orderMap;
     std::vector<Trade> tradeLog;
-    std::unordered_map<int , std::vector<Trade>> tradesByOrderId;
+    std::vector<Order> allOrders;
 };
 }
 
