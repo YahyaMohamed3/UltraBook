@@ -1,441 +1,352 @@
 #include "engine.hpp"
 #include <iostream>
-#include <algorithm> 
+#include <algorithm>
+#include <thread>
 #include "types.hpp"
+#include <oneapi/tbb/concurrent_unordered_map.h>
 
-namespace ultraBook{
+namespace ultraBook {
 
-MatchingEngine::MatchingEngine() = default;
-
-//Add limit order to the book 
-void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bool isBuy){
-    if(quantity <= 0){
-        std::cerr <<"Invalid order: Quantity must be bigger than 0 ." << std::endl;
-        return;
-    }
-    if(price <= 0){
-        std::cerr <<"Invalid order: Price must be bigger than 0" << std::endl;
-        return;
-    }
-    std::cout<<"[addLimitOrder] OrderID: "<<orderId
-             <<" , Price: "<< price
-             <<" , Qty: "<<quantity
-             <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
+MatchingEngine::MatchingEngine() {
+    // Initialize atomic price cache
+    bestBidPrice.store(0.0, std::memory_order_release);
+    bestAskPrice.store(std::numeric_limits<double>::max(), std::memory_order_release);
     
-    Order newOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::LIMIT);
+    // Initialize SIMD price levels with zero
+    __m256d zeroPrices = _mm256_setzero_pd();
+    __m256i zeroQtys = _mm256_setzero_si256();
     
-    if(isBuy){
-        buyOrders[price].push_back(newOrder);
-        auto& orderQueue = buyOrders[price];
-        orderMap[orderId] = &orderQueue.back();
-    }
-    else{
-        sellOrders[price].push_back(newOrder);
-        auto& orderQueue = sellOrders[price];
-        orderMap[orderId] = &orderQueue.back();
-    }
+    _mm256_store_pd(reinterpret_cast<double*>(&bestBuyPrices.prices), zeroPrices);
+    _mm256_store_pd(reinterpret_cast<double*>(&bestSellPrices.prices), zeroPrices);
     
-    setOrderStatus(orderMap[orderId], OrderStatus::ACTIVE);
+    lastUpdateTime_.store(getCurrentTimestamp(), std::memory_order_release);
 }
 
-//implement market order 
-void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
-    if(quantity <= 0) {
-        std::cerr << "Invalid order: Qty must be bigger than 0." << std::endl;
-        return;
-    }
+MatchingEngine::~MatchingEngine() {
+    // Process any remaining trades
+    processTradeQueue();
+}
 
-    std::cout << "[Market Order] OrderID: " << orderId
-              << ", quantity: " << quantity
-              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
-
-    Order marketOrder(orderId, std::nullopt, quantity, isBuy, OrderType::MARKET);
-    int remainingQty = quantity;
-
-    if (isBuy) {
-        while(remainingQty > 0 && !sellOrders.empty()) {
-            auto& sellQueue = sellOrders.begin()->second;
-            Order& sellOrder = sellQueue.front();
-
-            int tradeQty = std::min(remainingQty, sellOrder.quantity);
-            double tradePrice = sellOrders.begin()->first;
+void MatchingEngine::addLimitOrder(int orderId, double price, int quantity, bool isBuy) {
+    uint64_t startTime = getCurrentTimestamp();
+    
+    try {
+        // Validate inputs
+        if (price <= 0.0 || quantity <= 0) {
+            throw OrderException("Invalid price or quantity");
+        }
+        
+        // Create order using memory pool
+        Order* order = orderPool.allocate(orderId, price, quantity, isBuy, OrderType::LIMIT);
+        if (!order) {
+            throw OrderException("Failed to allocate order");
+        }
+        
+        // Add to order map and update metrics
+        orderMap.insert({orderId, order});
+        metrics_.totalOrders.fetch_add(1, std::memory_order_relaxed);
+        
+        // Update price level cache for SIMD matching
+        updatePriceLevelCache(price, quantity, isBuy);
+        
+        // Add to appropriate order book
+        if (isBuy) {
+            auto& level = buyOrders[price];
+            if (!level) {
+                level = std::make_unique<LockFreeLevel<Order>>(price);
+            }
+            level->addOrder(order);
             
-            std::cout<<"[Market Buy] OrderID: "<<orderId
-                     <<" matched with SellOrder "<<sellOrder.orderId
-                     <<" at price "<<tradePrice
-                     <<" for Qty "<< tradeQty<<std::endl;
-
-            Trade trade(orderId, sellOrder.orderId, tradePrice, tradeQty);
-            tradeLog.push_back(trade);
-
-            remainingQty -= tradeQty;
-            sellOrder.filledQuantity += tradeQty;
-            marketOrder.filledQuantity += tradeQty;
-
-            // Update sell order status
-            if (sellOrder.filledQuantity < sellOrder.quantity) {
-                setOrderStatus(&sellOrder, OrderStatus::PARTIALLY_FILLED);
-            } else {
-                setOrderStatus(&sellOrder, OrderStatus::FILLED);
-                orderMap.erase(sellOrder.orderId);
-                sellQueue.pop_front();
-                if(sellQueue.empty()) {
-                    sellOrders.erase(sellOrders.begin());
-                }
+            double currentBest = bestBidPrice.load(std::memory_order_acquire);
+            if (price > currentBest) {
+                bestBidPrice.store(price, std::memory_order_release);
             }
-        }
-    } else {
-        while(remainingQty > 0 && !buyOrders.empty()) {
-            auto& buyQueue = buyOrders.begin()->second;
-            Order& buyOrder = buyQueue.front();
-
-            int tradeQty = std::min(remainingQty, buyOrder.quantity);
-            double tradePrice = buyOrders.begin()->first;
-            
-            std::cout<<"Match [Market Sell] OrderID: "<<orderId
-                     <<" matched with "<<buyOrder.orderId
-                     <<" at price "<<tradePrice
-                     <<" for Qty "<<tradeQty<<std::endl;
-
-            Trade trade(buyOrder.orderId, orderId, tradePrice, tradeQty);
-            tradeLog.push_back(trade);
-
-            remainingQty -= tradeQty;
-            buyOrder.filledQuantity += tradeQty;
-            marketOrder.filledQuantity += tradeQty;
-
-            // Update buy order status
-            if (buyOrder.filledQuantity < buyOrder.quantity) {
-                setOrderStatus(&buyOrder, OrderStatus::PARTIALLY_FILLED);
-            } else {
-                setOrderStatus(&buyOrder, OrderStatus::FILLED);
-                orderMap.erase(buyOrder.orderId);
-                buyQueue.pop_front();
-                if(buyQueue.empty()) {
-                    buyOrders.erase(buyOrders.begin());
-                }
-            }
-        }
-    }
-
-    // Store and update market order status
-    allOrders.push_back(marketOrder);
-    Order* marketOrderPtr = &allOrders.back();
-    
-    if (remainingQty == quantity) {
-        setOrderStatus(marketOrderPtr, OrderStatus::CANCELED);
-        std::cout << "[Market Order] No matching orders found, order canceled." << std::endl;
-    } else if (remainingQty > 0) {
-        setOrderStatus(marketOrderPtr, OrderStatus::PARTIALLY_FILLED);
-        std::cout << "[Market Order] Partially filled: " << (quantity - remainingQty) 
-                 << " filled, " << remainingQty << " remaining (canceled)" << std::endl;
-    } else {
-        setOrderStatus(marketOrderPtr, OrderStatus::FILLED);
-        std::cout << "[Market Order] Fully filled." << std::endl;
-    }
-}
-
-void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool isBuy) {
-    if(price <= 0 || quantity <= 0) {
-        std::cerr << "[addIOCOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
-        return;
-    }
-
-    Order iocOrder(orderId, price, quantity, isBuy, OrderType::IOC);
-    allOrders.push_back(iocOrder);
-    Order* orderPtr = &allOrders.back();
-    setOrderStatus(orderPtr, OrderStatus::ACTIVE);
-
-    int remainingQty = quantity;
-    if(isBuy) {
-        while(remainingQty > 0 && !sellOrders.empty()) {
-            double lowestPrice = sellOrders.begin()->first;
-            if(lowestPrice <= price) {
-                auto& sellQueue = sellOrders.begin()->second;
-                Order& sellOrder = sellQueue.front();
-
-                int tradeQty = std::min(remainingQty, sellOrder.quantity);
-                remainingQty -= tradeQty;
-                sellOrder.filledQuantity += tradeQty;
-                orderPtr->filledQuantity += tradeQty;
-
-                std::cout << "[IOC Match] OrderID: " << orderId
-                         << " matched with sellOrder: " << sellOrder.orderId
-                         << " for QTY: " << tradeQty
-                         << " at price: " << lowestPrice << std::endl;
-
-                Trade trade(orderId, sellOrder.orderId, lowestPrice, tradeQty);
-                tradeLog.push_back(trade);
-
-                if(sellOrder.filledQuantity < sellOrder.quantity) {
-                    setOrderStatus(&sellOrder, OrderStatus::PARTIALLY_FILLED);
-                } else {
-                    setOrderStatus(&sellOrder, OrderStatus::FILLED);
-                    orderMap.erase(sellOrder.orderId);
-                    sellQueue.pop_front();
-                    if(sellQueue.empty()) {
-                        sellOrders.erase(sellOrders.begin());
-                    }
-                }
-            } else {
-                break; // Price not favorable
-            }
-        }
-    } else {
-        while(remainingQty > 0 && !buyOrders.empty()) {
-            double highestPrice = buyOrders.begin()->first;
-            if(highestPrice >= price) {
-                auto& buyQueue = buyOrders.begin()->second;
-                Order& buyOrder = buyQueue.front();
-
-                int tradeQty = std::min(remainingQty, buyOrder.quantity);
-                remainingQty -= tradeQty;
-                buyOrder.filledQuantity += tradeQty;
-                orderPtr->filledQuantity += tradeQty;
-
-                std::cout << "[IOC Match] OrderID: " << orderId
-                         << " matched with buyOrder: " << buyOrder.orderId
-                         << " for QTY: " << tradeQty
-                         << " at price: " << highestPrice << std::endl;
-
-                Trade trade(buyOrder.orderId, orderId, highestPrice, tradeQty);
-                tradeLog.push_back(trade);
-
-                if(buyOrder.filledQuantity < buyOrder.quantity) {
-                    setOrderStatus(&buyOrder, OrderStatus::PARTIALLY_FILLED);
-                } else {
-                    setOrderStatus(&buyOrder, OrderStatus::FILLED);
-                    orderMap.erase(buyOrder.orderId);
-                    buyQueue.pop_front();
-                    if(buyQueue.empty()) {
-                        buyOrders.erase(buyOrders.begin());
-                    }
-                }
-            } else {
-                break; // Price not favorable
-            }
-        }
-    }
-
-    // Update IOC order final status
-    if(orderPtr->filledQuantity == 0) {
-        setOrderStatus(orderPtr, OrderStatus::CANCELED);
-        std::cout << "[IOC Order] OrderID: " << orderId << " canceled - no matches at specified price" << std::endl;
-    } else if(orderPtr->filledQuantity < quantity) {
-        setOrderStatus(orderPtr, OrderStatus::PARTIALLY_FILLED);
-        std::cout << "[IOC Order] OrderID: " << orderId 
-                 << " partially filled: " << orderPtr->filledQuantity 
-                 << " of " << quantity << " shares. Remaining canceled." << std::endl;
-    } else {
-        setOrderStatus(orderPtr, OrderStatus::FILLED);
-        std::cout << "[IOC Order] OrderID: " << orderId << " fully filled." << std::endl;
-    }
-}
-
-void MatchingEngine::addFOKOrder(int orderId , double price , int quantity, bool isBuy){
-    if(price <= 0 || quantity <= 0 ){
-        std::cerr<<"Please make sure that the price and the  quantity are bigger than zero";
-        return;
-    }
-    Order FOCOrder(orderId , price , quantity , isBuy , OrderType::FOC);
-    allOrders.push_back(FOCOrder);
-    Order* orderPtr = &allOrders.back();
-    setOrderStatus(orderPtr , OrderStatus::ACTIVE);
-    int availble = 0;
-
-    if(isBuy){
-        auto it = sellOrders.begin();
-        double lowestPrice = it->first;
-        if(lowestPrice <= price){
-            auto& sellQueue = it->second;
-            //scan if there are enough orders to immdielty fill 
-            for(const auto& order : sellQueue) {
-                if(availble >= quantity) {
-                    break;  // We have enough quantity to fill the order
-                }
-                availble += order.quantity;
-            }
-            if(availble < quantity){
-                setOrderStatus(orderPtr, OrderStatus::CANCELED);
-                std::cout<<"[FOK Order] Order has been killed - insufficient quantity"<<std::endl;
-                return;
-            }
-
-        }
-
-
-
-
-
-
-
-    }
-
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-void MatchingEngine::printTradelog(){
-    for (const auto& trade : tradeLog) {
-        std::cout << trade << '\n';
-    }
-}
-
-void MatchingEngine::cancelOrder(int orderId) {
-    auto it = orderMap.find(orderId);
-    if (it != orderMap.end()) {
-        Order* order = it->second;
-        order->status = OrderStatus::CANCELED;
-        if (order->isBuy) {
-            // Remove from buyOrders map
-            auto& orderQueue = buyOrders[order->price.value()];
-            orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
-                                           [orderId](const Order& o) { return o.orderId == orderId; }),
-                           orderQueue.end());
         } else {
-            // Remove from sellOrders map
-            auto& orderQueue = sellOrders[order->price.value()];
-            orderQueue.erase(std::remove_if(orderQueue.begin(), orderQueue.end(),
-                                           [orderId](const Order& o) { return o.orderId == orderId; }),
-                           orderQueue.end());
+            auto& level = sellOrders[price];
+            if (!level) {
+                level = std::make_unique<LockFreeLevel<Order>>(price);
+            }
+            level->addOrder(order);
+            
+            double currentBest = bestAskPrice.load(std::memory_order_acquire);
+            if (price < currentBest) {
+                bestAskPrice.store(price, std::memory_order_release);
+            }
         }
-        orderMap.erase(it);
-        std::cout << "[cancelOrder] OrderID: " << orderId << " has been canceled." << std::endl;
-    } else {
-        std::cout << "[cancelOrder] OrderID: " << orderId << " not found." << std::endl;
+        
+        // Try matching
+        matchOrders();
+        
+        // Update performance metrics
+        uint64_t endTime = getCurrentTimestamp();
+        uint64_t latency = (endTime - startTime) * 1000000000ULL / getCpuFrequency();
+        metrics_.avgLatencyNs.store(
+            (metrics_.avgLatencyNs.load(std::memory_order_relaxed) + latency) / 2,
+            std::memory_order_relaxed
+        );
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Error adding limit order: " << e.what() << std::endl;
+        throw;
     }
-}
-//OrderBook snapshot
-void MatchingEngine::printOrderBook() const {
-    std::cout << "====== ORDER BOOK ======" << std::endl;
-    
-    // Print sell orders (highest to lowest)
-    std::cout<<"SELL ORDERS"<<std::endl;
-    for(auto it = sellOrders.rbegin(); it != sellOrders.rend(); ++it){
-        std::cout<<"Price: "<< it->first<<": ";
-        for(const auto& order : it->second){
-            std::cout<<"(OrderID "<<order.orderId 
-                    << ", "<< order.quantity<< " shares"
-                    << ", Status: " << order.status << ") ";
-        }
-        std::cout <<std::endl;
-    }
-    
-    // Print buy orders (highest to lowest)
-    std::cout<<"BUY ORDERS"<<std::endl;
-    for(const auto& [price , orders] : buyOrders){
-        std::cout<<"Price: "<<price<<": ";
-        for(const auto& order: orders){
-            std::cout<<"(OrderID "<<order.orderId
-                    <<", "<< order.quantity<<" shares"
-                    << ", Status: " << order.status << ") ";
-        }
-        std::cout<<std::endl;
-    }
-    
-    std::cout << "======================" << std::endl;
 }
 
 void MatchingEngine::matchOrders() {
-    std::cout << "[matchOrders] Attempting to match orders..." << std::endl;
+    // Fast path check using atomic price cache
+    double bid = bestBidPrice.load(std::memory_order_acquire);
+    double ask = bestAskPrice.load(std::memory_order_acquire);
     
-    bool matchFound = true;
+    if (bid <= 0.0 || ask >= std::numeric_limits<double>::max() || bid < ask) {
+        return;  // No matches possible
+    }
+
+    // Try batch matching first
+    batchMatchOrders();
     
-    while (matchFound) {
-        matchFound = false; 
+    // Continue with individual matches
+    while (true) {
+        auto buyIt = buyOrders.begin();
+        auto sellIt = sellOrders.begin();
         
-        if (buyOrders.empty() || sellOrders.empty()) {
+        if (buyIt == buyOrders.end() || sellIt == sellOrders.end()) {
             break;
         }
         
-        double highestBuyPrice = buyOrders.begin()->first;
-        double lowestSellPrice = sellOrders.begin()->first;
+        if (buyIt->first < sellIt->first) {
+            break;
+        }
         
-        if (highestBuyPrice >= lowestSellPrice) {
-            auto buyIt = buyOrders.begin();
-            auto sellIt = sellOrders.begin();
-            auto& buyQueue = buyIt->second;
-            auto& sellQueue = sellIt->second;
+        auto buyLevel = buyIt->second.get();
+        auto sellLevel = sellIt->second.get();
+        
+        if (!buyLevel || !sellLevel) {
+            break;
+        }
+        
+        Order* buyOrder = buyLevel->getFirstOrder();
+        Order* sellOrder = sellLevel->getFirstOrder();
+        
+        if (!buyOrder || !sellOrder) {
+            break;
+        }
+        
+        int tradeQty = std::min(buyOrder->getRemainingQuantity(),
+                               sellOrder->getRemainingQuantity());
+        
+        if (tradeQty > 0) {
+            executeTrade(buyOrder, sellOrder, sellIt->first, tradeQty);
             
-            Order& buyOrder = buyQueue.front();
-            Order& sellOrder = sellQueue.front();
-            
-            int tradeQty = std::min(buyOrder.quantity, sellOrder.quantity);
-            
-            std::cout << "[MATCH] BuyOrder " << buyOrder.orderId 
-                      << " matched with SellOrder " << sellOrder.orderId
-                      << " at price " << lowestSellPrice
-                      << " for quantity " << tradeQty << std::endl;
-
-            Trade trade(buyOrder.orderId, sellOrder.orderId, lowestSellPrice, tradeQty);
-            tradeLog.push_back(trade);
-            
-            buyOrder.filledQuantity += tradeQty;
-            sellOrder.filledQuantity += tradeQty;
-            
-            // Update order statuses
-            if (buyOrder.filledQuantity < buyOrder.quantity) {
-                setOrderStatus(&buyOrder, OrderStatus::PARTIALLY_FILLED);
-            } else {
-                setOrderStatus(&buyOrder, OrderStatus::FILLED);
-            }
-            
-            if (sellOrder.filledQuantity < sellOrder.quantity) {
-                setOrderStatus(&sellOrder, OrderStatus::PARTIALLY_FILLED);
-            } else {
-                setOrderStatus(&sellOrder, OrderStatus::FILLED);
-            }
-            
-            if (buyOrder.status == OrderStatus::FILLED) {
-                orderMap.erase(buyOrder.orderId);
-                buyQueue.pop_front();
-                if(buyQueue.empty()) {
-                    buyOrders.erase(buyIt);
+            if (buyOrder->getRemainingQuantity() == 0) {
+                buyLevel->removeFirstOrder();
+                if (buyLevel->empty()) {
+                    double price = buyIt->first;
+                    buyOrders[price].reset();  // Reset the unique_ptr
+                    updateBestBidPrice();
                 }
             }
             
-            if (sellOrder.status == OrderStatus::FILLED) {
-                orderMap.erase(sellOrder.orderId);
-                sellQueue.pop_front();
-                if(sellQueue.empty()) {
-                    sellOrders.erase(sellIt);
+            if (sellOrder->getRemainingQuantity() == 0) {
+                sellLevel->removeFirstOrder();
+                if (sellLevel->empty()) {
+                    double price = sellIt->first;
+                    sellOrders[price].reset();  // Reset the unique_ptr
+                    updateBestAskPrice();
                 }
             }
-            
-            matchFound = true;
         } else {
-            break;  // No matches possible at current price levels
+            break;
         }
     }
+}
+
+void MatchingEngine::batchMatchOrders() {
+    alignas(32) double buyPrices[4];
+    alignas(32) double sellPrices[4];
+    alignas(32) int buyQtys[4];
+    alignas(32) int sellQtys[4];
     
-    if (!matchFound) {
-        std::cout << "[matchOrders] No matches found." << std::endl;
+    // Load top 4 price levels into SIMD registers
+    int levelCount = 0;
+    for (auto it = buyOrders.begin(); it != buyOrders.end() && levelCount < 4; ++it, ++levelCount) {
+        buyPrices[levelCount] = it->first;
+        buyQtys[levelCount] = it->second->getTotalQuantity();
+    }
+    
+    levelCount = 0;
+    for (auto it = sellOrders.begin(); it != sellOrders.end() && levelCount < 4; ++it, ++levelCount) {
+        sellPrices[levelCount] = it->first;
+        sellQtys[levelCount] = it->second->getTotalQuantity();
+    }
+    
+    // Load into SIMD registers
+    __m256d buyPricesVec = _mm256_load_pd(buyPrices);
+    __m256d sellPricesVec = _mm256_load_pd(sellPrices);
+    __m256i buyQtysVec = _mm256_load_si256(reinterpret_cast<const __m256i*>(buyQtys));
+    __m256i sellQtysVec = _mm256_load_si256(reinterpret_cast<const __m256i*>(sellQtys));
+    
+    // Compare prices (buy >= sell)
+    __m256d matchMask = _mm256_cmp_pd(buyPricesVec, sellPricesVec, _CMP_GE_OQ);
+    int matches = _mm256_movemask_pd(matchMask);
+    
+    if (matches) {
+        // Process matches
+        for (int i = 0; i < 4; ++i) {
+            if (matches & (1 << i)) {
+                auto buyIt = buyOrders.find(buyPrices[i]);
+                auto sellIt = sellOrders.find(sellPrices[i]);
+                
+                if (buyIt != buyOrders.end() && sellIt != sellOrders.end()) {
+                    matchPriceLevels(buyIt->second.get(), sellIt->second.get(), sellPrices[i]);
+                }
+            }
+        }
+    }
+}
+
+void MatchingEngine::matchPriceLevels(LockFreeLevel<Order>* buyLevel, LockFreeLevel<Order>* sellLevel, double price) {
+    if (!buyLevel || !sellLevel) return;
+    
+    Order* buyOrder;
+    Order* sellOrder;
+    
+    while ((buyOrder = buyLevel->getFirstOrder()) && (sellOrder = sellLevel->getFirstOrder())) {
+        int tradeQty = std::min(buyOrder->getRemainingQuantity(), sellOrder->getRemainingQuantity());
+        if (tradeQty > 0) {
+            executeTrade(buyOrder, sellOrder, price, tradeQty);
+            
+            if (buyOrder->getRemainingQuantity() == 0) {
+                buyLevel->removeFirstOrder();
+            }
+            if (sellOrder->getRemainingQuantity() == 0) {
+                sellLevel->removeFirstOrder();
+            }
+        } else {
+            break;
+        }
+    }
+}
+
+void MatchingEngine::executeTrade(Order* buyOrder, Order* sellOrder, double price, int quantity) {
+    // Update order quantities
+    buyOrder->filledQuantity += quantity;
+    sellOrder->filledQuantity += quantity;
+    
+    // Create trade record
+    if (!tradeQueue.push(buyOrder->orderId, sellOrder->orderId, price, quantity)) {
+        processTradeQueue();  // Queue full, process some trades
+        tradeQueue.push(buyOrder->orderId, sellOrder->orderId, price, quantity);
+    }
+    
+    // Update order statuses
+    if (buyOrder->getRemainingQuantity() == 0) {
+        buyOrder->status = OrderStatus::FILLED;
+    } else {
+        buyOrder->status = OrderStatus::PARTIALLY_FILLED;
+    }
+    
+    if (sellOrder->getRemainingQuantity() == 0) {
+        sellOrder->status = OrderStatus::FILLED;
+    } else {
+        sellOrder->status = OrderStatus::PARTIALLY_FILLED;
+    }
+    
+    // Update metrics
+    metrics_.totalTrades.fetch_add(1, std::memory_order_relaxed);
+}
+
+void MatchingEngine::updateOrderStatus(Order* order) {
+    if (order->getRemainingQuantity() == 0) {
+        setOrderStatus(order, OrderStatus::FILLED);
+    } else if (order->filledQuantity > 0) {
+        setOrderStatus(order, OrderStatus::PARTIALLY_FILLED);
     }
 }
 
 void MatchingEngine::setOrderStatus(Order* order, OrderStatus newStatus) {
-    if (!order) {
-        std::cerr << "Error: Cannot set status on null order" << std::endl;
-        return;
-    }
-
+    if (!order) return;
+    
     OrderStatus oldStatus = order->status;
     order->status = newStatus;
     
-    std::cout << "[Status Update] OrderID: " << order->orderId 
-              << " Status changed from " << oldStatus 
-              << " to " << newStatus << std::endl;
+    if (oldStatus != newStatus) {
+        std::cout << "[Status Update] OrderID: " << order->orderId 
+                  << " Status changed from " << oldStatus 
+                  << " to " << newStatus << std::endl;
+    }
 }
 
+void MatchingEngine::updateBestPrices() {
+    if (!buyOrders.empty()) {
+        bestBidPrice.store(buyOrders.begin()->first, std::memory_order_release);
+    } else {
+        bestBidPrice.store(0.0, std::memory_order_release);
+    }
+    
+    if (!sellOrders.empty()) {
+        bestAskPrice.store(sellOrders.begin()->first, std::memory_order_release);
+    } else {
+        bestAskPrice.store(std::numeric_limits<double>::max(), std::memory_order_release);
+    }
+    _mm_sfence();
 }
+
+void MatchingEngine::updateBestBidPrice() {
+    double newBid = buyOrders.empty() ? 0.0 : buyOrders.begin()->first;
+    bestBidPrice.store(newBid, std::memory_order_release);
+}
+
+void MatchingEngine::updateBestAskPrice() {
+    double newAsk = sellOrders.empty() ? 
+        std::numeric_limits<double>::max() : 
+        sellOrders.begin()->first;
+    bestAskPrice.store(newAsk, std::memory_order_release);
+}
+
+void MatchingEngine::updatePriceLevelCache(double price, int quantity, bool isBuy) {
+    alignas(32) double prices[4] = {price, price, price, price};
+    alignas(32) int quantities[4] = {quantity, quantity, quantity, quantity};
+    
+    auto& cache = isBuy ? bestBuyPrices : bestSellPrices;
+    _mm256_store_pd(reinterpret_cast<double*>(&cache.prices), _mm256_load_pd(prices));
+}
+
+uint64_t MatchingEngine::getCurrentTimestamp() const {
+    return rdtsc();
+}
+
+uint64_t MatchingEngine::getCpuFrequency() {
+    static const uint64_t freq = []() {
+        uint64_t start = rdtsc();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        return (rdtsc() - start) * 10;  // Frequency in Hz
+    }();
+    return freq;
+}
+
+uint64_t MatchingEngine::getLatencyNs(uint64_t startTime) const {
+    return (rdtsc() - startTime) * 1000000000ULL / getCpuFrequency();
+}
+
+void MatchingEngine::processTradeQueue() {
+    Trade* trade = nullptr;
+    while (tradeQueue.try_pop(trade)) {
+        if (trade) {
+            tradeLog.push_back(*trade);
+        }
+    }
+}
+
+void MatchingEngine::printOrderBook() const {
+    std::cout << "\nOrder Book:\n";
+    std::cout << "Bids:\n";
+    for (const auto& [price, level] : buyOrders) {
+        std::cout << price << ": " << level->getTotalQuantity() << "\n";
+    }
+    std::cout << "\nAsks:\n";
+    for (const auto& [price, level] : sellOrders) {
+        std::cout << price << ": " << level->getTotalQuantity() << "\n";
+    }
+    std::cout << std::endl;
+}
+
+} // namespace ultraBook
