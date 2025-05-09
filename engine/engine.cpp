@@ -76,6 +76,8 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
             remainingQty -= tradeQty;
             sellOrder.filledQuantity += tradeQty;
             marketOrder.filledQuantity += tradeQty;
+            lastPrice = tradePrice;
+            checkandTrigger(lastPrice);
 
             if (sellOrder.isComplete()) {
                 setOrderStatus(&sellOrder, OrderStatus::FILLED);
@@ -114,6 +116,8 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
             remainingQty -= tradeQty;
             buyOrder.filledQuantity += tradeQty;
             marketOrder.filledQuantity += tradeQty;
+            lastPrice = tradePrice;
+            checkandTrigger(lastPrice);
 
             if (buyOrder.isComplete()) {
                 setOrderStatus(&buyOrder, OrderStatus::FILLED);
@@ -181,6 +185,9 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
                 tradeLog.push_back(trade);
                 tradesByOrderId[orderId].push_back(trade);
                 tradesByOrderId[sellOrder.orderId].push_back(trade);
+                lastPrice = lowestPrice;
+                checkandTrigger(lastPrice);
+
 
                 if(sellOrder.getRemainingQuantity() > 0) {
                     setOrderStatus(&sellOrder, OrderStatus::PARTIALLY_FILLED);
@@ -217,6 +224,8 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
                 tradeLog.push_back(trade);
                 tradesByOrderId[orderId].push_back(trade);
                 tradesByOrderId[buyOrder.orderId].push_back(trade);
+                lastPrice = highestPrice;
+                checkandTrigger(lastPrice);
 
                 if(buyOrder.getRemainingQuantity() > 0) {
                     setOrderStatus(&buyOrder, OrderStatus::PARTIALLY_FILLED);
@@ -318,6 +327,8 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             remainingQty -= tradeQty;
             sellOrder.filledQuantity += tradeQty;
             orderPtr->filledQuantity += tradeQty;
+            lastPrice = execPrice;
+            checkandTrigger(lastPrice);
 
             std::cout << "[FOK Match] Buy OrderID: " << orderId 
                      << " matched with Sell OrderID: " << sellOrder.orderId
@@ -362,6 +373,8 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             remainingQty -= tradeQty;
             buyOrder.filledQuantity += tradeQty;
             orderPtr->filledQuantity += tradeQty;
+            lastPrice = execPrice;
+            checkandTrigger(lastPrice);
 
             std::cout << "[FOK Match] Sell OrderID: " << orderId 
                      << " matched with Buy OrderID: " << buyOrder.orderId
@@ -383,7 +396,6 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             }
         }
     }
-
     setOrderStatus(orderPtr, OrderStatus::FILLED);
     std::cout << "[FOK Order] OrderID: " << orderId << " fully filled" << std::endl;
 }
@@ -462,33 +474,68 @@ void MatchingEngine::addStopOrder(int orderId, double stopPrice, int quantity, b
     //order set to inactive by default in the constructor
 }
 
-void MatchingEngine::checkandTrigger(double lastTradePrice) {
-    std::cout << "[checkandTrigger] Checking stop orders..." << std::endl;
-    for (auto& [price, orderQueue] : buyStopOrders) {
-        for (auto& order : orderQueue) {
-            if (order.status == OrderStatus::INACTIVE && lastTradePrice >= price) {
-                order.status = OrderStatus::TRIGGERED;
-                std::cout << "[Buy Stop Order Triggered] OrderID: " << order.orderId << std::endl;
-                // Convert to market order
-                convertStopToMarket(&order);
+void MatchingEngine::checkandTrigger(double lastprice){
+    std::cout<<"[checkandTrigger] Last Price: "<<lastprice<<std::endl;
+    auto it = buyStopOrders.begin();
+    while(it != buyStopOrders.end()){
+        auto& orderQueue = it->second;
+        Order& stopOrder = orderQueue.front();
+        if(stopOrder.stopPrice && lastprice >= stopOrder.stopPrice.value()){
+            std::cout<<"[checkandTrigger] Buy Stop OrderID: "<<stopOrder.orderId
+                     <<" triggered at price "<<lastprice<<std::endl;
+            stopOrder.status = OrderStatus::TRIGGERED;
+            convertStopToMarket(&stopOrder);
+            orderMap.erase(stopOrder.orderId);
+            orderQueue.pop_front();
+            if(orderQueue.empty()){
+                buyStopOrders.erase(it++);
+            }else{
+                ++it;
             }
+        }else{
+            ++it;
         }
     }
+    it = sellStopOrders.begin();
+    while(it != sellStopOrders.end()){
+        auto& orderQueue = it->second;
+        Order& stopOrder = orderQueue.front();
+        if(stopOrder.stopPrice && lastprice <= stopOrder.stopPrice.value()){
+            std::cout<<"[checkandTrigger] Sell Stop OrderID: "<<stopOrder.orderId
+                     <<" triggered at price "<<lastprice<<std::endl;
+            stopOrder.status = OrderStatus::TRIGGERED;
+            convertStopToMarket(&stopOrder);
+            orderMap.erase(stopOrder.orderId);
+            orderQueue.pop_front();
+            if(orderQueue.empty()){
+                sellStopOrders.erase(it++);
+            }else{
+                ++it;
+            }
+        }else{
+            ++it;
+        }
+    }
+    // Check for triggered orders and convert to market orders
 
-    for (auto& [price, orderQueue] : sellStopOrders) {
-        for (auto& order : orderQueue) {
-            if (order.status == OrderStatus::INACTIVE && lastTradePrice <= price) {
-                order.status = OrderStatus::TRIGGERED;
-                std::cout << "[Sell Stop Order Triggered] OrderID: " << order.orderId << std::endl;
-                // Convert to market order
-                convertStopToMarket(&order);
-            }
-        }
-    }
+
+
+
+
 }
 void MatchingEngine::convertStopToMarket(Order* order) {
+    if (order->status == OrderStatus::TRIGGERED) {
+        std::cout << "[convertStopToMarket] Converting Stop OrderID: " << order->orderId << " to Market Order." << std::endl;
+        order->type = OrderType::MARKET;
+        order->status = OrderStatus::ACTIVE; // Set to active for market order
+        order->price = std::nullopt; // No price for market orders
+        orderMap[order->orderId] = order; // Update map with new type
+
+        MatchingEngine::addMarketOrder(order->orderId, order->quantity, order->isBuy);
+    }
 
 }
+
 
 
 
@@ -622,6 +669,8 @@ void MatchingEngine::matchOrders() {
 
             buyOrder.filledQuantity += tradeQty;
             sellOrder.filledQuantity += tradeQty;
+            lastPrice = lowestSellPrice;
+            checkandTrigger(lastPrice);
             
             // Update order statuses
             if (buyOrder.getRemainingQuantity() > 0) {

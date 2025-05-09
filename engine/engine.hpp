@@ -35,6 +35,7 @@ public:
 
 private:
     // Internal data structures for buy/sell order books
+    double lastPrice = 0.0;
     std::map<double, std::deque<Order>, std::greater<>> buyOrders; // High-to-low
     std::map<double, std::deque<Order>> sellOrders; // Low-to-high default
     std::map<double, std::deque<Order>> buyStopOrders; // Buy Orders
