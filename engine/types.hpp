@@ -63,12 +63,11 @@ struct Order {
     std::optional<double> stopPrice;             
     std::optional<std::chrono::system_clock::time_point> expiry = std::nullopt ;
     std::optional<int> visibleQuantity;          
-    std::optional<int> minQuantity;              
+    std::optional<int> hiddenQuantity;              
 
-    Order(int id, std::optional<double> p, int q, bool side, OrderType orderType,std::optional<std::chrono::system_clock::time_point> exp = std::nullopt, std::optional<double> stop = std::nullopt)
+    Order(int id, std::optional<double> p, int q, bool side, OrderType orderType,std::optional<std::chrono::system_clock::time_point> exp = std::nullopt, std::optional<double> stop = std::nullopt, std::optional<int> vis = std::nullopt, std::optional<int> hid = std::nullopt)
         : orderId(id), price(p), quantity(q), isBuy(side), type(orderType),
-          timestamp(std::chrono::high_resolution_clock::now()) , expiry(exp), stopPrice(stop)
-    {
+          timestamp(std::chrono::high_resolution_clock::now()) , expiry(exp), stopPrice(stop), visibleQuantity(vis), hiddenQuantity(hid){
         if (quantity <= 0) {
             throw OrderException("Invalid quantity: must be positive");
         }

@@ -23,7 +23,7 @@ public:
     void addStopLimitOrder(int orderId, double stopPrice, double limitPrice, int quantity, bool isBuy);
     void addIOCOrder(int orderId, double price, int quantity, bool isBuy);
     void addFOKOrder(int orderId, double price, int quantity, bool isBuy);
-    void addIcebergOrder(int orderId, double price, int totalQuantity, int visibleQuantity, bool isBuy);
+    void addIcebergOrder(int orderId, double price, int quantity, int visibleQuantity, int hiddenQuantity, bool isBuy);
     void cancelOrder(int orderId);
     void printOrderBook() const;
     void printTradelog();

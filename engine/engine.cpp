@@ -155,7 +155,7 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
         return;
     }
 
-    Order iocOrder(orderId, price, quantity, isBuy, OrderType::IOC);
+    Order iocOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::IOC);
     allOrders.push_back(iocOrder);
     Order* orderPtr = &allOrders.back();
     std::cout << "[IOC Order] OrderID: " << orderId
@@ -409,7 +409,7 @@ void MatchingEngine::addGTCOrder(int orderId, double price , int quantity, bool 
               << ", Price: " << price
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
-    Order gtcOrder(orderId, price, quantity, isBuy, OrderType::GTC);
+    Order gtcOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::GTC);
     allOrders.push_back(gtcOrder);
     if(isBuy){
         buyOrders[price].push_back(gtcOrder);
@@ -435,7 +435,7 @@ if(quantity <= 0 || price <= 0) {
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") 
               << ", Expiry: " << std::chrono::system_clock::to_time_t(expiry) << std::endl;
-    Order gtdOrder(orderId, price, quantity, isBuy, OrderType::GTD, expiry);
+    Order gtdOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::GTD, expiry);
     allOrders.push_back(gtdOrder);
     if(isBuy){
         buyOrders[price].push_back(gtdOrder);
@@ -447,7 +447,6 @@ if(quantity <= 0 || price <= 0) {
         auto& orderQueue = sellOrders[price];
         orderMap[orderId] = &orderQueue.back();
     }
-
 }
 
 void MatchingEngine::addStopOrder(int orderId, double stopPrice, int quantity, bool isBuy){
@@ -459,7 +458,8 @@ void MatchingEngine::addStopOrder(int orderId, double stopPrice, int quantity, b
               << ", Stop Price: " << stopPrice
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
-    Order stopOrder(orderId, stopPrice, quantity, isBuy, OrderType::STOP);
+    Order stopOrder(orderId, std::nullopt, quantity, isBuy, OrderType::STOP, 
+                    std::nullopt, std::optional<double>{stopPrice});
     allOrders.push_back(stopOrder);
     if(isBuy){
         buyStopOrders[stopPrice].push_back(stopOrder);
@@ -517,17 +517,10 @@ void MatchingEngine::checkandTrigger(double lastprice){
         }
     }
     // Check for triggered orders and convert to market orders
-
-
-
-
-
 }
 void MatchingEngine::convertStopToMarket(Order* order) {
     if (order->status == OrderStatus::TRIGGERED) {
         std::cout << "[convertStopToMarket] Converting Stop OrderID: " << order->orderId << " to Market Order." << std::endl;
-        order->type = OrderType::MARKET;
-        order->status = OrderStatus::ACTIVE; // Set to active for market order
         order->price = std::nullopt; // No price for market orders
         orderMap[order->orderId] = order; // Update map with new type
 
@@ -537,7 +530,71 @@ void MatchingEngine::convertStopToMarket(Order* order) {
 }
 
 
+void MatchingEngine::addStopLimitOrder(int orderId, double stopPrice, double limitPrice, int quantity, bool isBuy) {
+    if (quantity <= 0 || stopPrice <= 0 || limitPrice <= 0) {
+        std::cerr << "[addStopLimitOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        return;
+    }
+    std::cout << "[Stop Limit Order] OrderID: " << orderId
+              << ", Stop Price: " << stopPrice
+              << ", Limit Price: " << limitPrice
+              << ", Qty: " << quantity
+              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
+    Order stopLimitOrder(orderId, std::optional<double>{limitPrice}, quantity, isBuy, OrderType::STOPLIMIT, 
+                         std::nullopt, std::optional<double>{stopPrice});
+    allOrders.push_back(stopLimitOrder);
+    if(isBuy){
+        buyStopOrders[stopPrice].push_back(stopLimitOrder);
+        auto& orderQueue = buyStopOrders[stopPrice];
+        orderMap[orderId] = &orderQueue.back();
+    }
+    else{
+        sellStopOrders[stopPrice].push_back(stopLimitOrder);
+        auto& orderQueue = sellStopOrders[stopPrice];
+        orderMap[orderId] = &orderQueue.back();
+    }
+}
 
+void MatchingEngine::addIcebergOrder(int orderId, double price , int quantity, int visibleQuantity, int hiddenQuantity , bool isBuy){
+    if(quantity <= 0 || visibleQuantity <= 0 || price <= 0){
+        std::cerr << "[addIcebergOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        return;
+    }
+    std::cout<<"[Iceberg Order] OrderID: "<<orderId
+                <<" , Price: "<<price
+                <<" , Total Qty: "<<quantity
+                <<" , Visible Qty: "<<visibleQuantity
+                <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
+                Order icebergOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::ICE, 
+                    std::nullopt, std::nullopt, 
+                    std::optional<int>{visibleQuantity}, 
+                    std::optional<int>{hiddenQuantity});
+    allOrders.push_back(icebergOrder);
+    if(isBuy){
+        buyOrders[price].push_back(icebergOrder);
+        auto& orderQueue = buyOrders[price];
+        orderMap[orderId] = &orderQueue.back();
+    }
+    else{
+        sellOrders[price].push_back(icebergOrder);
+        auto& orderQueue = sellOrders[price];
+        orderMap[orderId] = &orderQueue.back();
+
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
 
 
 
