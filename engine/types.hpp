@@ -47,6 +47,7 @@ inline std::ostream& operator<<(std::ostream& os, const OrderStatus& status) {
         case OrderStatus::PARTIALLY_FILLED: return os << "PARTIALLY_FILLED";
         case OrderStatus::FILLED: return os << "FILLED";
         case OrderStatus::CANCELED: return os << "CANCELED";
+        case OrderStatus::EXPIRED: return os << "EXPIRED";
         default: return os << "UNKNOWN";
     }
 }
@@ -60,22 +61,37 @@ struct Order {
     OrderType type;
     OrderStatus status{OrderStatus::ACTIVE};
     std::chrono::high_resolution_clock::time_point timestamp;
-    std::optional<double> stopPrice;             
-    std::optional<std::chrono::system_clock::time_point> expiry = std::nullopt ;
+    std::optional<std::chrono::system_clock::time_point> expiry = std::nullopt;
+    std::optional<double> stopPrice;
     std::optional<int> visibleQuantity;          
-    std::optional<int> hiddenQuantity;              
+    std::optional<int> replenishQuantity;              
 
-    Order(int id, std::optional<double> p, int q, bool side, OrderType orderType,std::optional<std::chrono::system_clock::time_point> exp = std::nullopt, std::optional<double> stop = std::nullopt, std::optional<int> vis = std::nullopt, std::optional<int> hid = std::nullopt)
-        : orderId(id), price(p), quantity(q), isBuy(side), type(orderType),
-          timestamp(std::chrono::high_resolution_clock::now()) , expiry(exp), stopPrice(stop), visibleQuantity(vis), hiddenQuantity(hid){
+    Order(int id, std::optional<double> p, int q, bool side, OrderType orderType,
+          std::optional<std::chrono::system_clock::time_point> exp = std::nullopt, 
+          std::optional<double> stop = std::nullopt, 
+          std::optional<int> vis = std::nullopt, 
+          std::optional<int> hid = std::nullopt)
+        // Initialize in the same order as declared in the struct
+        : orderId(id), 
+          price(p), 
+          quantity(q), 
+          filledQuantity(0), 
+          isBuy(side), 
+          type(orderType),
+          status(orderType == OrderType::STOP || orderType == OrderType::STOPLIMIT ? OrderStatus::INACTIVE : OrderStatus::ACTIVE),
+          timestamp(std::chrono::high_resolution_clock::now()),
+          expiry(exp), 
+          stopPrice(stop), 
+          visibleQuantity(vis), 
+          replenishQuantity(hid)
+    {
         if (quantity <= 0) {
             throw OrderException("Invalid quantity: must be positive");
         }
-        if (type == OrderType::LIMIT && (!price || price.value() <= 0)) {
+        if ((type == OrderType::LIMIT || type == OrderType::GTC || type == OrderType::GTD || 
+             type == OrderType::IOC || type == OrderType::FOK || type == OrderType::ICE) && 
+            (!price || price.value() <= 0)) {
             throw OrderException("Limit orders must have valid positive price");
-        }
-        if( type == OrderType::STOP){
-            status = OrderStatus::INACTIVE;
         }
     }
 

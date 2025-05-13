@@ -16,14 +16,14 @@ class MatchingEngine{
 public:
     MatchingEngine();
     void addLimitOrder(int orderId, double price, int quantity, bool isBuy);
-    void addMarketOrder(int orderId, int quantity, bool isBuy);
+    void addMarketOrder(int orderId, int quantity, bool isBuy, bool isConverted = false, Order* existingOrder = nullptr);
     void addGTCOrder(int orderId, double price, int quantity, bool isBuy);
     void addGTDOrder(int orderId, double price, int quantity, bool isBuy, std::chrono::system_clock::time_point expiry);
     void addStopOrder(int orderId, double stopPrice, int quantity, bool isBuy);
     void addStopLimitOrder(int orderId, double stopPrice, double limitPrice, int quantity, bool isBuy);
     void addIOCOrder(int orderId, double price, int quantity, bool isBuy);
     void addFOKOrder(int orderId, double price, int quantity, bool isBuy);
-    void addIcebergOrder(int orderId, double price, int quantity, int visibleQuantity, int hiddenQuantity, bool isBuy);
+    void addIcebergOrder(int orderId, double price, int quantity, int visibleQuantity, int replenishQuantity, bool isBuy);
     void cancelOrder(int orderId);
     void printOrderBook() const;
     void printTradelog();
@@ -32,6 +32,9 @@ public:
     OrderStatus getOrderStatus(int orderId) const;
     void convertStopToMarket(Order* order);
     void checkandTrigger(double lastprice);
+    void replenishIcebergOrder(Order* order);
+    void convertStopToLimit(Order* order);
+    void checkExpiredOrders(); // New method to check expired GTD orders
 
 private:
     // Internal data structures for buy/sell order books
