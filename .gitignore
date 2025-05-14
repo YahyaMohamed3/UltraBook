@@ -1,2 +1,4 @@
 autocommit.sh 
 build/
+vcpkg/
+build_and_test.bat 
