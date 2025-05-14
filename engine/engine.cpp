@@ -2,7 +2,6 @@
 #include <iostream>
 #include <algorithm> 
 #include "types.hpp"
-#include"helpers.cpp"
 
 namespace ultraBook{
 
@@ -33,6 +32,9 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
 
     // Create a new order object
     Order newOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::LIMIT);
+    
+    // Add to allOrdersMap for history tracking
+    allOrdersMap[orderId] = newOrder;
 
     // Add to appropriate side of the order book and update the order map for quick access
     if(isBuy){
@@ -78,8 +80,8 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy, bool 
     if (!isConverted) {
         // Create a new market order
         Order marketOrder(orderId, std::nullopt, quantity, isBuy, OrderType::MARKET);
-        allOrders.push_back(marketOrder);
-        marketOrderPtr = &allOrders.back();
+        allOrdersMap[orderId] = marketOrder;
+        marketOrderPtr = &allOrdersMap[orderId];
     } else {
         // Use the existing order (e.g., converted stop order)
         marketOrderPtr = existingOrder;
@@ -213,10 +215,10 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
         return;
     }
 
-    // Create IOC order and store in allOrders
+    // Create IOC order and store in allOrdersMap
     Order iocOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::IOC);
-    allOrders.push_back(iocOrder);
-    Order* orderPtr = &allOrders.back();
+    allOrdersMap[orderId] = iocOrder;
+    Order* orderPtr = &allOrdersMap[orderId];
     
     std::cout << "[IOC Order] OrderID: " << orderId
               << ", Price: " << price
@@ -345,10 +347,10 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
         throw OrderException("Invalid parameters for FOK order");
     }
 
-    // Create FOK order and store in allOrders
+    // Create FOK order and store in allOrdersMap
     Order fokOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::FOK);
-    allOrders.push_back(fokOrder);
-    Order* orderPtr = &allOrders.back();
+    allOrdersMap[orderId] = fokOrder;
+    Order* orderPtr = &allOrdersMap[orderId];
     
     std::cout<<"[FOK Order] OrderID: "<<orderId
              <<", Price: "<<price
@@ -524,9 +526,9 @@ void MatchingEngine::addGTCOrder(int orderId, double price , int quantity, bool 
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
     
-    // Create GTC order and store in allOrders and appropriate order book
+    // Create GTC order and store in allOrdersMap and appropriate order book
     Order gtcOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::GTC);
-    allOrders.push_back(gtcOrder);
+    allOrdersMap[orderId] = gtcOrder;
     if(isBuy){
         buyOrders[price].push_back(gtcOrder);
         auto& orderQueue = buyOrders[price];
@@ -563,9 +565,9 @@ void MatchingEngine::addGTDOrder(int orderId, double price, int quantity, bool i
               << ", Side: " << (isBuy ? "Buy" : "Sell") 
               << ", Expiry: " << std::chrono::system_clock::to_time_t(expiry) << std::endl;
     
-    // Create GTD order and store in allOrders and appropriate order book
+    // Create GTD order and store in allOrdersMap and appropriate order book
     Order gtdOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::GTD, expiry);
-    allOrders.push_back(gtdOrder);
+    allOrdersMap[orderId] = gtdOrder;
     if(isBuy){
         buyOrders[price].push_back(gtdOrder);
         auto& orderQueue = buyOrders[price];
@@ -602,10 +604,10 @@ void MatchingEngine::addStopOrder(int orderId, double stopPrice, int quantity, b
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
     
-    // Create Stop order and store in allOrders and appropriate stop order book
+    // Create Stop order and store in allOrdersMap and appropriate stop order book
     Order stopOrder(orderId, std::nullopt, quantity, isBuy, OrderType::STOP, 
                     std::nullopt, std::optional<double>{stopPrice});
-    allOrders.push_back(stopOrder);
+    allOrdersMap[orderId] = stopOrder;
     if(isBuy){
         buyStopOrders[stopPrice].push_back(stopOrder);
         auto& orderQueue = buyStopOrders[stopPrice];
@@ -717,10 +719,10 @@ void MatchingEngine::addStopLimitOrder(int orderId, double stopPrice, double lim
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
     
-    // Create Stop Limit order and store in allOrders and appropriate stop order book
+    // Create Stop Limit order and store in allOrdersMap and appropriate stop order book
     Order stopLimitOrder(orderId, std::optional<double>{limitPrice}, quantity, isBuy, OrderType::STOPLIMIT, 
                          std::nullopt, std::optional<double>{stopPrice});
-    allOrders.push_back(stopLimitOrder);
+    allOrdersMap[orderId] = stopLimitOrder;
     if(isBuy){
         buyStopOrders[stopPrice].push_back(stopLimitOrder);
         auto& orderQueue = buyStopOrders[stopPrice];
@@ -775,19 +777,20 @@ void MatchingEngine::convertStopToMarket(Order* order) {
  */
 void MatchingEngine::convertStopToLimit(Order* order) {
     if (order->status == OrderStatus::TRIGGERED) {
+        // We need to use the original limit price (order->price) not the stop price
         std::cout << "[convertStopToLimit] Converting Stop Limit OrderID: " << order->orderId 
-                  << " to Limit Order at price: " << order->stopPrice.value() << std::endl;
+                  << " to Limit Order at price: " << order->price.value() << std::endl;
 
         // Store original values we need to preserve
         int orderId = order->orderId;
         int quantity = order->quantity;
         int filledQuantity = order->filledQuantity;
         bool isBuy = order->isBuy;
-        double limitPrice = order->stopPrice.value();
+        double limitPrice = order->price.value(); // Fix: Use the original limit price
         
-        // Update the order type and prices
+        // Update the order type and stop price (but keep the original limit price)
         order->type = OrderType::LIMIT;
-        order->price = order->stopPrice;
+        // Don't change order->price - it's already correctly set to the limit price
         order->stopPrice = std::nullopt;
         
         // Remove from orderMap temporarily
@@ -840,12 +843,12 @@ void MatchingEngine::addIcebergOrder(int orderId, double price , int quantity, i
                 <<" , Replenish Qty: "<<replenishQuantity
                 <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
                 
-    // Create Iceberg order and store in allOrders and appropriate order book
+    // Create Iceberg order and store in allOrdersMap and appropriate order book
     Order icebergOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::ICE, 
                     std::nullopt, std::nullopt, 
                     std::optional<int>{visibleQuantity}, 
                     std::optional<int>{replenishQuantity});
-    allOrders.push_back(icebergOrder);
+    allOrdersMap[orderId] = icebergOrder;
     if(isBuy){
         buyOrders[price].push_back(icebergOrder);
         auto& orderQueue = buyOrders[price];
@@ -912,7 +915,8 @@ void MatchingEngine::cancelOrder(int orderId) {
             return;
         }
         
-        order->status = OrderStatus::CANCELED;
+        // Use setOrderStatus instead of direct status assignment to keep allOrdersMap in sync
+        setOrderStatus(order, OrderStatus::CANCELED);
         
         // Only attempt to remove from order books if the order has a price
         if (order->price.has_value()) {
@@ -1173,6 +1177,11 @@ void MatchingEngine::setOrderStatus(Order* order, OrderStatus newStatus) {
     OrderStatus oldStatus = order->status;
     order->status = newStatus;
     
+    // Synchronize status change to allOrdersMap to keep everything consistent
+    if (order->orderId > 0 && allOrdersMap.find(order->orderId) != allOrdersMap.end()) {
+        allOrdersMap[order->orderId].status = newStatus;
+    }
+    
     std::cout << "[Status Update] OrderID: " << order->orderId 
               << " Status changed from " << oldStatus 
               << " to " << newStatus << std::endl;
@@ -1187,21 +1196,20 @@ void MatchingEngine::setOrderStatus(Order* order, OrderStatus newStatus) {
  * @return The current status of the order
  */
 OrderStatus MatchingEngine::getOrderStatus(int orderId) const {
-    // First check if the order is in the active order map
-    auto it = orderMap.find(orderId);
-    if (it != orderMap.end()) {
-        return it->second->status;
+    // First check active orders for faster lookup
+    auto activeIt = orderMap.find(orderId);
+    if (activeIt != orderMap.end()) {
+        return activeIt->second->status;
     }
     
-    // If not active, search in allOrders for completed/canceled orders
-    for (const auto& order : allOrders) {
-        if (order.orderId == orderId) {
-            return order.status;
-        }
+    // If not active, check in allOrdersMap (also O(1) lookup)
+    auto historyIt = allOrdersMap.find(orderId);
+    if (historyIt != allOrdersMap.end()) {
+        return historyIt->second.status;
     }
     
-    // If order not found, return CANCELED as default
-    return OrderStatus::CANCELED;
+    // If truly not found
+    return OrderStatus::CANCELED; // Or add a NOT_FOUND status
 }
 
 /**

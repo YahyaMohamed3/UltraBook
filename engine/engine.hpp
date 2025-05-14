@@ -48,7 +48,7 @@ private:
     std::unordered_map<int, Order*> orderMap;
     std::vector<Trade> tradeLog;
     std::unordered_map<int , std::vector<Trade>> tradesByOrderId;
-    std::vector<Order> allOrders;
+    std::unordered_map<int, Order> allOrdersMap; 
 };
 }
 #endif // ENGINE_HPP

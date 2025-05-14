@@ -1,24 +1,48 @@
 cmake_minimum_required(VERSION 3.14)
-project(fastchain)
+project(FastChain VERSION 0.1.0)
 
+# Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Engine library
+# Add engine library
 add_library(engine
     engine/engine.cpp
-    engine/types.hpp
-    engine/engine.hpp
 )
 
-target_include_directories(engine PUBLIC engine)
+# Add include directories
+target_include_directories(engine PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+)
 
-# Engine executable
-add_executable(engine_main engine/main.cpp)
-target_link_libraries(engine_main PRIVATE engine)
+# Testing setup
+# Download and configure Google Test
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG release-1.12.1
+)
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
 
-# Add tests directory
-add_subdirectory(tests)
+# Enable testing
+enable_testing()
 
-# Add benchmarks directory
-add_subdirectory(benchmarks)
+# Create test executable
+add_executable(matching_engine_tests 
+    tests/engine/test_matching_engine.cpp
+)
+
+# Link against Google Test and your engine
+target_link_libraries(matching_engine_tests
+    PRIVATE 
+    engine
+    gtest
+    gtest_main
+)
+
+# Register tests
+include(GoogleTest)
+gtest_discover_tests(matching_engine_tests)

@@ -66,6 +66,10 @@ struct Order {
     std::optional<int> visibleQuantity;          
     std::optional<int> replenishQuantity;              
 
+    // Default constructor (needed for std::unordered_map)
+    Order() : orderId(0), quantity(0), filledQuantity(0), isBuy(false), 
+              type(OrderType::LIMIT), timestamp(std::chrono::high_resolution_clock::now()) {}
+
     Order(int id, std::optional<double> p, int q, bool side, OrderType orderType,
           std::optional<std::chrono::system_clock::time_point> exp = std::nullopt, 
           std::optional<double> stop = std::nullopt, 
