@@ -115,7 +115,13 @@ gtest_discover_tests(matching_engine_tests)
 # Create benchmark executable
 # Allow customization of which benchmark file to use
 if(NOT DEFINED BENCHMARK_FILE)
-    set(BENCHMARK_FILE "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/benchmark_matching_engine.cpp")
+    # Check if the default benchmark file exists, otherwise use the basic one
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/benchmark_matching_engine.cpp")
+        set(BENCHMARK_FILE "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/benchmark_matching_engine.cpp")
+    else()
+        message(STATUS "Default benchmark file not found, using basic_benchmarks.cpp instead")
+        set(BENCHMARK_FILE "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/basic_benchmarks.cpp")
+    endif()
 endif()
 
 add_executable(matching_engine_benchmarks

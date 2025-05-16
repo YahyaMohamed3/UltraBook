@@ -1,5 +1,6 @@
 @echo off
-setlocal enabledelayedexpansion
+setREM Configure CMake to include the new benchmark file
+cmake -DBENCHMARK_FILE="c:\Users\yahya\fastchain\benchmarks\engine\basic_benchmarks.cpp" ..cal enabledelayedexpansion
 
 echo ===== FastChain Basic Benchmark Runner =====
 echo This script will run basic performance benchmarks for the matching engine

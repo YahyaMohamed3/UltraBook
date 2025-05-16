@@ -24,55 +24,73 @@ echo ===== Performance Summary =====
 
 echo Order Processing Throughput:
 echo ---------------------------
-echo Finding throughput metrics...
-findstr /C:"BM_OrderProcessingThroughput" %RESULTS_FILE% | findstr /C:"items_per_second"
-echo.
 echo Target: ^>1,000,000 orders/second
+echo.
+
+echo Benchmark Results:
+type %RESULTS_FILE% | findstr /C:"BM_OrderProcessingThroughput" | findstr /C:"name"
+type %RESULTS_FILE% | findstr /C:"BM_OrderProcessingThroughput" | findstr /C:"real_time"
+type %RESULTS_FILE% | findstr /C:"BM_OrderProcessingThroughput" | findstr /C:"items_per_second"
 echo.
 
 echo Matching Latency:
 echo ----------------
-echo Finding latency metrics...
-findstr /C:"BM_MatchingLatency" %RESULTS_FILE% | findstr /C:"cpu_time"
+echo Target: ^<500ns average latency per match
 echo.
-echo Target: ^<500ns average latency
+
+echo Benchmark Results:
+type %RESULTS_FILE% | findstr /C:"BM_MatchingLatency" | findstr /C:"name"
+type %RESULTS_FILE% | findstr /C:"BM_MatchingLatency" | findstr /C:"real_time"
+type %RESULTS_FILE% | findstr /C:"BM_MatchingLatency" | findstr /C:"cpu_time"
 echo.
 
 echo Order Book Updates:
 echo -----------------
-echo Finding update metrics...
-findstr /C:"BM_OrderBookUpdates" %RESULTS_FILE% | findstr /C:"items_per_second"
-echo.
 echo Target: ^>5,000,000 updates/second
+echo.
+
+echo Benchmark Results:
+type %RESULTS_FILE% | findstr /C:"BM_OrderBookUpdates" | findstr /C:"name"
+type %RESULTS_FILE% | findstr /C:"BM_OrderBookUpdates" | findstr /C:"real_time"
+type %RESULTS_FILE% | findstr /C:"BM_OrderBookUpdates" | findstr /C:"items_per_second"
 echo.
 
 echo Order Lookup Performance:
 echo ----------------------
-echo Finding lookup metrics...
-findstr /C:"BM_OrderLookup" %RESULTS_FILE% | findstr /C:"cpu_time"
-echo.
 echo Target: ^<100ns per lookup
+echo.
+
+echo Benchmark Results:
+type %RESULTS_FILE% | findstr /C:"BM_OrderLookup" | findstr /C:"name"
+type %RESULTS_FILE% | findstr /C:"BM_OrderLookup" | findstr /C:"real_time"
 echo.
 
 echo Order Cancellation Performance:
 echo ---------------------------
-echo Finding cancellation metrics...
-findstr /C:"BM_OrderCancellation" %RESULTS_FILE% | findstr /C:"cpu_time"
-echo.
 echo Target: ^<1μs per cancellation
+echo.
+
+echo Benchmark Results:
+type %RESULTS_FILE% | findstr /C:"BM_OrderCancellation" | findstr /C:"name"
+type %RESULTS_FILE% | findstr /C:"BM_OrderCancellation" | findstr /C:"real_time"
+type %RESULTS_FILE% | findstr /C:"BM_OrderCancellation" | findstr /C:"items_per_second"
 echo.
 
 echo Market Order Execution:
 echo --------------------
-echo Finding market order metrics...
-findstr /C:"BM_MarketOrderExecution" %RESULTS_FILE% | findstr /C:"cpu_time"
+echo Target: ^<10μs per market order execution
 echo.
-echo Target: ^<10μs per market order
+
+echo Benchmark Results:
+type %RESULTS_FILE% | findstr /C:"BM_MarketOrderExecution" | findstr /C:"name"
+type %RESULTS_FILE% | findstr /C:"BM_MarketOrderExecution" | findstr /C:"real_time"
+type %RESULTS_FILE% | findstr /C:"BM_MarketOrderExecution" | findstr /C:"items_per_second"
 echo.
 
 echo ===== Performance Analysis Complete =====
 echo.
 echo For detailed results, examine the JSON file: %RESULTS_FILE%
+echo To run more comprehensive benchmarks, modify benchmark sizes in basic_benchmarks.cpp
 
 endlocal
 pause

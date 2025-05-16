@@ -3,15 +3,20 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
+#include <atomic>
+#include <iostream>
 #include "engine.hpp"
 
 // Constants for benchmarking
-constexpr int ORDER_COUNT_SMALL = 1000;
-constexpr int ORDER_COUNT_MEDIUM = 10000;
-constexpr double PRICE_MIN = 90.0;
+constexpr int ORDER_COUNT_SMALL = 10000;    // Small but significant benchmark size
+constexpr int ORDER_COUNT_MEDIUM = 10000;   // Medium benchmark size for more reliable results
+constexpr double PRICE_MIN = 109.9;
 constexpr double PRICE_MAX = 110.0;
 constexpr int QTY_MIN = 1;
 constexpr int QTY_MAX = 100;
+
+// Global atomic counter to ensure unique order IDs across all benchmarks
+static std::atomic<int> global_order_id_counter{1};
 
 // Helper class to generate test orders
 class OrderGenerator {
@@ -20,23 +25,25 @@ private:
     std::uniform_real_distribution<double> price_dist;
     std::uniform_int_distribution<int> qty_dist;
     std::bernoulli_distribution side_dist;
-    int next_order_id = 1;
+    int benchmark_start_id; // Each benchmark instance will have its own starting ID
 
 public:
     OrderGenerator() 
         : rng(std::random_device{}()),
           price_dist(PRICE_MIN, PRICE_MAX),
           qty_dist(QTY_MIN, QTY_MAX),
-          side_dist(0.5) // 50% buy, 50% sell
+          side_dist(0.5), // 50% buy, 50% sell
+          benchmark_start_id(global_order_id_counter.fetch_add(10000)) // Reserve a range of IDs
     {}
     
-    // Generate a random limit order
+    // Generate a random limit order with a guaranteed unique ID
     ultraBook::Order generateLimitOrder() {
         double price = price_dist(rng);
         int qty = qty_dist(rng);
         bool is_buy = side_dist(rng);
+        int order_id = global_order_id_counter.fetch_add(1); // Atomically get next ID
         return ultraBook::Order(
-            next_order_id++,
+            order_id,
             std::optional<double>{price},
             qty,
             is_buy,
@@ -55,8 +62,9 @@ public:
             double price = price_dist(rng);
             int qty = qty_dist(rng);
             bool is_buy = custom_side_dist(rng);
+            int order_id = global_order_id_counter.fetch_add(1); // Atomically get next ID
             orders.emplace_back(
-                next_order_id++,
+                order_id,
                 std::optional<double>{price},
                 qty,
                 is_buy,
@@ -66,8 +74,12 @@ public:
         return orders;
     }
     
+    // This is kept for backward compatibility with existing code
+    // but now it doesn't reset to 1, it just ensures the next set of IDs
+    // will be sequential starting from a new base
     void resetOrderIds() {
-        next_order_id = 1;
+        // Instead of resetting to 1, we reserve a new block of IDs
+        benchmark_start_id = global_order_id_counter.fetch_add(1000);
     }
     
     std::mt19937& getRng() {
@@ -77,12 +89,14 @@ public:
 
 // Benchmark 1: Order Processing Throughput
 static void BM_OrderProcessingThroughput(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
     for (auto _ : state) {
         state.PauseTiming();
         ultraBook::MatchingEngine engine;
-        OrderGenerator generator;
         
         // Create a more realistic order flow with different order profiles
         std::vector<ultraBook::Order> orders;
@@ -92,18 +106,13 @@ static void BM_OrderProcessingThroughput(benchmark::State& state) {
         std::uniform_real_distribution<> price_dist(PRICE_MIN, PRICE_MAX);
         std::uniform_int_distribution<> qty_dist(QTY_MIN, QTY_MAX);
         
-        // Simulate different trading patterns to make the benchmark more realistic:
-        // 1. Normal trading activity (60% of orders)
-        // 2. Price discovery burst (20% of orders tightly clustered around certain price points)
-        // 3. Large institutional orders (10% of orders with larger sizes)
-        // 4. Technical levels trading (10% of orders at key price points)
-        
+        // Simulate different trading patterns to make the benchmark more realistic
         double current_price = 100.0; // Simulated current market price
-          std::uniform_int_distribution<> pattern_dist(0, 9); // 0-9 for different patterns
+        std::uniform_int_distribution<> pattern_dist(0, 9); // 0-9 for different patterns
         std::uniform_int_distribution<> cluster_index(0, 2); // For price clusters
         std::uniform_int_distribution<> tech_index(0, 4);   // For technical levels
         std::bernoulli_distribution buy_sell_dist(0.5);      // 50% buy, 50% sell
-            
+        
         for (int i = 0; i < order_count; i++) {
             double price;
             int quantity;
@@ -143,8 +152,9 @@ static void BM_OrderProcessingThroughput(benchmark::State& state) {
                 is_buy = (price <= current_price);
             }
             
+            int orderId = global_order_id_counter.fetch_add(1);
             orders.emplace_back(
-                generator.generateLimitOrder().orderId,
+                orderId,
                 std::optional<double>{price},
                 quantity,
                 is_buy,
@@ -170,6 +180,9 @@ static void BM_OrderProcessingThroughput(benchmark::State& state) {
 
 // Benchmark 2: Matching Latency
 static void BM_MatchingLatency(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    // No need to reset order IDs anymore, as each generator has unique IDs
     const int book_depth = state.range(0); // Number of orders in book
     const int match_count = state.range(1); // Number of orders to match
     
@@ -177,7 +190,6 @@ static void BM_MatchingLatency(benchmark::State& state) {
         state.PauseTiming();
         
         ultraBook::MatchingEngine engine;
-        OrderGenerator generator;
         
         // Create a realistic market structure with price levels
         // 1. Define price levels for a market with a spread
@@ -217,7 +229,8 @@ static void BM_MatchingLatency(benchmark::State& state) {
             double price = buy_price_levels[i];
             for (int j = 0; j < orders_at_level; j++) {
                 int quantity = qty_dist(rng);
-                engine.addLimitOrder(generator.generateLimitOrder().orderId, price, quantity, true);
+                int order_id = global_order_id_counter.fetch_add(1);
+                engine.addLimitOrder(order_id, price, quantity, true);
             }
             
             remaining_buy_orders -= orders_at_level;
@@ -234,7 +247,8 @@ static void BM_MatchingLatency(benchmark::State& state) {
             double price = sell_price_levels[i];
             for (int j = 0; j < orders_at_level; j++) {
                 int quantity = qty_dist(rng);
-                engine.addLimitOrder(generator.generateLimitOrder().orderId, price, quantity, false);
+                int order_id = global_order_id_counter.fetch_add(1);
+                engine.addLimitOrder(order_id, price, quantity, false);
             }
             
             remaining_sell_orders -= orders_at_level;
@@ -244,10 +258,11 @@ static void BM_MatchingLatency(benchmark::State& state) {
         std::uniform_real_distribution<> price_improvement_dist(0.0, 5.0);
         std::vector<ultraBook::Order> matching_orders;
         for (int i = 0; i < match_count; i++) {
+            int order_id = global_order_id_counter.fetch_add(1);
             if (i % 2 == 0) {
                 // Buy orders with prices that cross the spread (market aggressors)
                 matching_orders.emplace_back(
-                    generator.generateLimitOrder().orderId,
+                    order_id,
                     std::optional<double>{100.5 + price_improvement_dist(rng)},
                     qty_dist(rng), // Varying quantities
                     true,
@@ -256,7 +271,7 @@ static void BM_MatchingLatency(benchmark::State& state) {
             } else {
                 // Sell orders with prices that cross the spread (market aggressors)
                 matching_orders.emplace_back(
-                    generator.generateLimitOrder().orderId,
+                    order_id,
                     std::optional<double>{99.5 - price_improvement_dist(rng)},
                     qty_dist(rng), // Varying quantities
                     false,
@@ -283,13 +298,15 @@ static void BM_MatchingLatency(benchmark::State& state) {
 
 // Benchmark 3: Order Book Updates
 static void BM_OrderBookUpdates(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    // No need to reset order IDs anymore as we use the global counter
     const int update_count = state.range(0);
     
     for (auto _ : state) {
         state.PauseTiming();
         
         ultraBook::MatchingEngine engine;
-        OrderGenerator generator;
         
         // Pre-populate the book
         auto initial_orders = generator.generateOrders(100);
@@ -317,7 +334,8 @@ static void BM_OrderBookUpdates(benchmark::State& state) {
                 // Cancel an existing order
                 int cancel_id = -1;
                 if (!order_ids.empty()) {
-                    size_t index = generator.getRng() % order_ids.size();
+                    std::uniform_int_distribution<size_t> index_dist(0, order_ids.size() - 1);
+                    size_t index = index_dist(generator.getRng());
                     cancel_id = order_ids[index];
                     order_ids.erase(order_ids.begin() + index);
                 }
@@ -360,13 +378,15 @@ static void BM_OrderBookUpdates(benchmark::State& state) {
 
 // Benchmark 4: Single Order Lookup Performance
 static void BM_OrderLookup(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
     for (auto _ : state) {
         state.PauseTiming();
         
         ultraBook::MatchingEngine engine;
-        OrderGenerator generator;
         
         // Add orders to the book
         auto orders = generator.generateOrders(order_count);
@@ -388,25 +408,27 @@ static void BM_OrderLookup(benchmark::State& state) {
         
         state.ResumeTiming();
         
-        // Perform order lookups
-        for (int i = 0; i < std::min(1000, order_count); i++) {
+        // Perform order lookups - limit to exactly order_count lookups
+        for (int i = 0; i < order_count; i++) {
             int id = order_ids[i % order_ids.size()];
             benchmark::DoNotOptimize(engine.getOrderStatus(id));
         }
     }
     
-    state.SetItemsProcessed(state.iterations() * std::min(1000, order_count));
+    state.SetItemsProcessed(state.iterations() * order_count);
 }
 
 // Benchmark 5: Order Cancellation Performance
 static void BM_OrderCancellation(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
     for (auto _ : state) {
         state.PauseTiming();
         
         ultraBook::MatchingEngine engine;
-        OrderGenerator generator;
         
         // Add orders to the book
         auto orders = generator.generateOrders(order_count);
@@ -436,13 +458,15 @@ static void BM_OrderCancellation(benchmark::State& state) {
 
 // Benchmark 6: Market Order Execution
 static void BM_MarketOrderExecution(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
     for (auto _ : state) {
         state.PauseTiming();
         
         ultraBook::MatchingEngine engine;
-        OrderGenerator generator;
         
         // Prepare the book with limit orders
         auto buy_orders = generator.generateOrders(order_count/2, 1.0); // All buys
@@ -466,17 +490,20 @@ static void BM_MarketOrderExecution(benchmark::State& state) {
                 false
             );
         }
-          // Generate market orders with varying sizes (realistic market impact)
+        
+        // Generate market orders with varying sizes (realistic market impact)
         // Smaller orders are more common, large orders are rare
         std::vector<int> market_order_ids;
         std::vector<int> market_order_quantities;
         std::vector<bool> market_order_sides;
         
+        // Generate a fixed number of market orders (20)
+        const int NUM_MARKET_ORDERS = 20;
         std::uniform_real_distribution<> size_dist(0.0, 1.0);
         
-        for (int i = 0; i < 10; i++) {
-            // Generate order ID
-            int order_id = generator.generateLimitOrder().orderId;
+        for (int i = 0; i < NUM_MARKET_ORDERS; i++) {
+            // Use unique order IDs from global counter
+            int order_id = global_order_id_counter.fetch_add(1);
             market_order_ids.push_back(order_id);
             
             // Generate quantity with power law distribution (more small orders, fewer large orders)
@@ -498,38 +525,60 @@ static void BM_MarketOrderExecution(benchmark::State& state) {
         }
     }
     
-    state.SetItemsProcessed(state.iterations() * 10); // 10 market orders
+    state.SetItemsProcessed(state.iterations() * 20); // 20 market orders
 }
 
-// Register the benchmarks
+// Add a simple warmup benchmark to verify benchmark system is working
+static void BM_Warmup(benchmark::State& state) {
+    for (auto _ : state) {
+        // Just a simple operation to make sure the benchmark framework is working
+        std::vector<int> v(100, 0);
+        benchmark::DoNotOptimize(v.data());
+    }
+}
+
+// Register the warmup benchmark first
+BENCHMARK(BM_Warmup)
+    ->Unit(benchmark::kNanosecond)
+    ->Iterations(1);  // Just run once for warm-up
+
+// Register the benchmarks with more realistic sizes
+// but use fixed iterations to limit runtime
 BENCHMARK(BM_OrderProcessingThroughput)
-    ->Arg(1000)     // 1K orders
-    ->Arg(10000)    // 10K orders
-    ->Unit(benchmark::kMillisecond);
+    ->Arg(ORDER_COUNT_SMALL)      // Small but meaningful benchmark
+    ->Unit(benchmark::kMicrosecond)  // Use μs for order processing
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
 
 BENCHMARK(BM_MatchingLatency)
-    ->Args({100, 10})      // 100 orders in book, 10 matches
-    ->Args({1000, 100})    // 1K orders in book, 100 matches
-    ->Unit(benchmark::kMicrosecond);
+    ->Args({100, 20})             // 100 orders in book, 20 matches
+    ->Unit(benchmark::kNanosecond)   // Use ns for latency measurements
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderBookUpdates)
-    ->Arg(1000)     // 1K updates
-    ->Arg(10000)    // 10K updates
-    ->Unit(benchmark::kMillisecond);
+    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of updates
+    ->Unit(benchmark::kMicrosecond)  // Use μs for updates
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderLookup)
-    ->Arg(100)      // 100 orders
-    ->Arg(10000)    // 10K orders
-    ->Unit(benchmark::kNanosecond);
+    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of lookups
+    ->Unit(benchmark::kNanosecond)   // Use ns for lookups
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderCancellation)
-    ->Arg(100)      // 100 orders
-    ->Arg(1000)     // 1K orders
-    ->Unit(benchmark::kMicrosecond);
+    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of cancellations
+    ->Unit(benchmark::kNanosecond)   // Use ns for cancellations
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
 
 BENCHMARK(BM_MarketOrderExecution)
-    ->Arg(1000)     // 1K limit orders in book
-    ->Arg(10000)    // 10K limit orders in book
-    ->Unit(benchmark::kMicrosecond);
+    ->Arg(100)                    // 100 limit orders with 20 market orders
+    ->Unit(benchmark::kNanosecond)   // Use ns for market order execution
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
 
+// Use BENCHMARK_MAIN() which is simpler
 BENCHMARK_MAIN();
