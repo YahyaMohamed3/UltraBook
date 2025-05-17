@@ -35,6 +35,7 @@ public:
     void replenishIcebergOrder(Order* order);
     void convertStopToLimit(Order* order);
     void checkExpiredOrders(); // New method to check expired GTD orders
+    void ModifyOrder(int OrderId , double newPrice , int newQuantity);
 
 private:
     // Internal data structures for buy/sell order books

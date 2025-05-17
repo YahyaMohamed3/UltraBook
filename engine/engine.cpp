@@ -1288,5 +1288,41 @@ void MatchingEngine::checkExpiredOrders() {
         std::cout << "[checkExpiredOrders] No expired orders found." << std::endl;
     }
 }
+
+void modifyOrder(int orderId, double newPrice, int newQuantity){
+    if(newQuantity <= 0 || newPrice <= 0){
+        std::cerr<<"Invlaid Order: please make sure price and quantity are bigger than 0."<<std::endl;
+        return;
+    }
+
+    auto it = orderMap.find(orderId);
+    if(it != orderMap.end()){
+        Order* order = it->second;
+        if(order->status == OrderStatus::FILLED || order->status == OrderStatus::CANCELED ){
+            std::cout<<"[modifyOrder] OrderID: "<<orderId<<" is already filled."<<std::endl;
+            return;
+        }
+        
+        // Update the order's price and quantity
+        order->price = newPrice;
+        order->quantity = newQuantity;
+
+        // Update the order in the appropriate book
+        if(order->isBuy){
+            buyOrders[newPrice].push_back(*order);
+            auto& orderQueue = buyOrders[newPrice];
+            orderMap[orderId] = &orderQueue.back();
+        }else{
+            sellOrders[newPrice].push_back(*order);
+            auto& orderQueue = sellOrders[newPrice];
+            orderMap[orderId] = &orderQueue.back();
+        }
+
+
+
+
+
+}
+
 } // namespace ultraBook
 // engine.cpp
