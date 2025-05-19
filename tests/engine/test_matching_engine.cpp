@@ -316,6 +316,141 @@ TEST_F(MatchingEngineTest, PriceTimePriority) {
     ASSERT_EQ(engine.getOrderStatus(3), OrderStatus::FILLED);
 }
 
+// Test order modification with price-time priority
+TEST_F(MatchingEngineTest, OrderModificationPriceTimePriority) {
+    // Add multiple buy orders at the same price level
+    engine.addLimitOrder(1, 10.0, 50, true);  // Buy 50 @ $10.00 (first in queue)
+    engine.addLimitOrder(2, 10.0, 50, true);  // Buy 50 @ $10.00 (second in queue)
+    engine.addLimitOrder(3, 10.0, 50, true);  // Buy 50 @ $10.00 (third in queue)
+    
+    // Add a small sell order that will only match with the first order
+    engine.addLimitOrder(4, 10.0, 20, false); // Sell 20 @ $10.00
+    
+    // Match orders - this should partially fill order #1
+    engine.matchOrders();
+    
+    // Verify order #1 is partially filled
+    ASSERT_EQ(engine.getOrderStatus(1), OrderStatus::PARTIALLY_FILLED);
+    ASSERT_EQ(engine.getOrderStatus(2), OrderStatus::ACTIVE);
+    ASSERT_EQ(engine.getOrderStatus(3), OrderStatus::ACTIVE);
+    
+    // Create modification requests
+    OrderModificationRequest priceChangeRequest;
+    priceChangeRequest.newPrice = 10.5; // Higher price
+    
+    OrderModificationRequest quantityIncreaseRequest;
+    quantityIncreaseRequest.newQuantity = 100; // Increased quantity
+    
+    OrderModificationRequest statusChangeRequest;
+    statusChangeRequest.newStatus = OrderStatus::EXPIRED;
+    
+    // Test 1: Price change should lose queue position
+    engine.ModifyOrder(2, priceChangeRequest);
+      // Test 2: Quantity increase should also lose queue position
+    engine.ModifyOrder(3, quantityIncreaseRequest);    
+    
+    // Add sell orders that will match with all our buy orders:
+    // 1. First add a sell order at 10.5 to match with Order #2
+    engine.addLimitOrder(5, 10.5, 50, false); // Sell 50 @ $10.5 (to match order 2)    // 2. Then add another sell order at 10.0 to match with Orders #1 and #3
+    // Order 1 has 30 remaining (50 - 20 filled) and Order 3 now needs 100
+    engine.addLimitOrder(6, 10.0, 130, false); // Sell 130 @ $10.0 for orders 1 and part of 3
+    
+    // Add one more sell order to fully match order 3
+    engine.addLimitOrder(7, 10.0, 50, false); // Sell 50 @ $10.0 to ensure order 3 is fully filled
+    
+    // Debug print the order status before matching
+    std::cout << "DEBUG - Before matching - Order 3 status: " << static_cast<int>(engine.getOrderStatus(3)) 
+              << ", Order 1 status: " << static_cast<int>(engine.getOrderStatus(1)) << std::endl;
+    
+    // Print order book to see what's happening before matching
+    std::cout << "\n====== Order Book Before Matching ======\n";
+    engine.printOrderBook();
+      // Match orders
+    engine.matchOrders();
+    
+    // Print order book after matching
+    std::cout << "\n====== Order Book After Matching ======\n";
+    engine.printOrderBook();
+    
+    // Debug the status values after matching
+    auto status1 = engine.getOrderStatus(1);
+    auto status2 = engine.getOrderStatus(2);
+    auto status3 = engine.getOrderStatus(3);
+    
+    std::cout << "After matchOrders - Order 1 status: " << static_cast<int>(status1)
+              << ", Order 2 status: " << static_cast<int>(status2)
+              << ", Order 3 status: " << static_cast<int>(status3) << std::endl;
+    
+    // Verify all orders were filled
+    ASSERT_EQ(status1, OrderStatus::FILLED);
+    ASSERT_EQ(status2, OrderStatus::FILLED);
+    ASSERT_EQ(status3, OrderStatus::FILLED);
+    
+    // Test status modification
+    engine.addLimitOrder(6, 11.0, 50, true);  // Buy 50 @ $11.00
+    engine.ModifyOrder(6, statusChangeRequest);
+    ASSERT_EQ(engine.getOrderStatus(6), OrderStatus::EXPIRED);
+}
+
+// Test modification of different order types
+TEST_F(MatchingEngineTest, ModifyDifferentOrderTypes) {
+    // Create a stop order
+    engine.addStopOrder(1, 10.5, 100, true);  // Buy stop @ $10.5, Qty 100
+    ASSERT_EQ(engine.getOrderStatus(1), OrderStatus::INACTIVE);
+    
+    // Create an iceberg order
+    engine.addIcebergOrder(2, 10.0, 300, 50, 50, false); // Sell 300 @ $10.0 with 50 visible
+    ASSERT_EQ(engine.getOrderStatus(2), OrderStatus::ACTIVE);
+    
+    // Print order book to see initial state
+    std::cout << "\n====== Order Book Before Modification ======\n";
+    engine.printOrderBook();
+    
+    // Modify stop order's stop price
+    OrderModificationRequest stopPriceModRequest;
+    stopPriceModRequest.newStopPrice = 11.0;
+    engine.ModifyOrder(1, stopPriceModRequest);
+    
+    // Modify iceberg order's visible and replenish quantities
+    OrderModificationRequest icebergModRequest;
+    icebergModRequest.newVisibleQuantity = 100;
+    icebergModRequest.newReplenishQuantity = 100;
+    engine.ModifyOrder(2, icebergModRequest);
+    
+    // Print order book after modifications
+    std::cout << "\n====== Order Book After Modification ======\n";
+    engine.printOrderBook();
+    
+    // Verify orders retain their status after modification
+    auto status1 = engine.getOrderStatus(1);
+    auto status2 = engine.getOrderStatus(2);
+    std::cout << "\nOrder 1 Status: " << static_cast<int>(status1) << std::endl;
+    std::cout << "Order 2 Status: " << static_cast<int>(status2) << std::endl;
+    
+    ASSERT_EQ(status1, OrderStatus::INACTIVE);
+    ASSERT_EQ(status2, OrderStatus::ACTIVE);
+    
+    // Create a trade to trigger the stop order
+    engine.addLimitOrder(3, 11.0, 50, false); // Sell 50 @ $11.0
+    engine.addLimitOrder(4, 11.0, 50, true);  // Buy 50 @ $11.0
+    
+    // Match to create the trade
+    engine.matchOrders();
+    
+    // Print final order book
+    std::cout << "\n====== Order Book After Trade ======\n";
+    engine.printOrderBook();
+    
+    // Check and trigger stop orders with the last trade price
+    engine.checkandTrigger(11.0);
+    
+    // Verify the stop order was triggered at the new stop price
+    auto finalStatus = engine.getOrderStatus(1);
+    std::cout << "\nFinal Order 1 Status: " << static_cast<int>(finalStatus) << std::endl;
+    
+    ASSERT_NE(finalStatus, OrderStatus::INACTIVE);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

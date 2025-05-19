@@ -1068,9 +1068,7 @@ void MatchingEngine::matchOrders() {
                     }
                     continue; // Skip to next iteration
                 }
-            }
-
-            // Calculate trade quantity based on order type
+            }            // Calculate trade quantity based on order type
             int tradeQty = 0;
             if(buyOrder.type == OrderType::ICE && buyOrder.visibleQuantity.has_value() && buyOrder.replenishQuantity.has_value()) {
                  tradeQty = std::min(buyOrder.visibleQuantity.value(), sellOrder.getRemainingQuantity()); 
@@ -1081,6 +1079,14 @@ void MatchingEngine::matchOrders() {
             else {
                  tradeQty = std::min(buyOrder.getRemainingQuantity(), sellOrder.getRemainingQuantity());
             }
+            
+            // Debug the matching process
+            std::cout << "[DEBUG MATCH] BuyOrder " << buyOrder.orderId 
+                      << " (remaining: " << buyOrder.getRemainingQuantity() << ")"
+                      << " matched with SellOrder " << sellOrder.orderId
+                      << " (remaining: " << sellOrder.getRemainingQuantity() << ")"
+                      << " at price " << lowestSellPrice
+                      << " for quantity " << tradeQty << std::endl;
 
             std::cout << "[MATCH] BuyOrder " << buyOrder.orderId 
                       << " matched with SellOrder " << sellOrder.orderId
@@ -1289,40 +1295,189 @@ void MatchingEngine::checkExpiredOrders() {
     }
 }
 
-void modifyOrder(int orderId, double newPrice, int newQuantity){
-    if(newQuantity <= 0 || newPrice <= 0){
-        std::cerr<<"Invlaid Order: please make sure price and quantity are bigger than 0."<<std::endl;
+//Modify order - Implementing price-time priority
+// This function handles order modifications while maintaining price-time priority rules
+
+void MatchingEngine::ModifyOrder(int OrderId, const OrderModificationRequest& modRequest) {
+    auto it = orderMap.find(OrderId);
+    if(it == orderMap.end() || !it->second) {
+        std::cerr << "[ModifyOrder] OrderID: " << OrderId << " not found." << std::endl;
         return;
     }
-
-    auto it = orderMap.find(orderId);
-    if(it != orderMap.end()){
-        Order* order = it->second;
-        if(order->status == OrderStatus::FILLED || order->status == OrderStatus::CANCELED ){
-            std::cout<<"[modifyOrder] OrderID: "<<orderId<<" is already filled."<<std::endl;
-            return;
+    
+    Order* order = it->second;
+    if(order->status == OrderStatus::FILLED) {
+        std::cout << "[ModifyOrder] OrderID: " << OrderId << " is already filled." << std::endl;
+        return;
+    }
+    
+    // Store original values to determine if price-time priority needs to be reset
+    std::optional<double> oldPrice = order->price;
+    std::optional<double> oldStopPrice = order->stopPrice;
+    int oldQuantity = order->quantity;
+    bool priceChanged = false;
+    bool quantityIncreased = false;
+    bool needsRepositioning = false;
+    
+    // First, save a copy of the order for later operations
+    Order orderCopy = *order;
+    
+    // Apply the modifications to the copy
+    if(modRequest.newPrice.has_value()) {
+        if(order->price != modRequest.newPrice) {
+            orderCopy.price = modRequest.newPrice;
+            priceChanged = true;
+            std::cout << "[ModifyOrder] OrderID: " << OrderId << " price modified to " << orderCopy.price.value() << std::endl;
         }
+    }
+    
+    if(modRequest.newQuantity.has_value()) {
+        int newQty = modRequest.newQuantity.value();
+        if(newQty > order->quantity) {
+            quantityIncreased = true;
+        }
+        orderCopy.quantity = newQty;
+        std::cout << "[ModifyOrder] OrderID: " << OrderId << " quantity modified to " << orderCopy.quantity << std::endl;
+    }
+    
+    if(modRequest.newVisibleQuantity.has_value()) {
+        orderCopy.visibleQuantity = modRequest.newVisibleQuantity;
+        std::cout << "[ModifyOrder] OrderID: " << OrderId << " visible quantity modified to " << orderCopy.visibleQuantity.value() << std::endl;
+    }
+    
+    if(modRequest.newReplenishQuantity.has_value()) {
+        orderCopy.replenishQuantity = modRequest.newReplenishQuantity;
+        std::cout << "[ModifyOrder] OrderID: " << OrderId << " replenish quantity modified to " << orderCopy.replenishQuantity.value() << std::endl;
+    }
+    
+    if(modRequest.newStopPrice.has_value()) {
+        if(order->stopPrice != modRequest.newStopPrice) {
+            orderCopy.stopPrice = modRequest.newStopPrice;
+            priceChanged = true;
+            std::cout << "[ModifyOrder] OrderID: " << OrderId << " stop price modified to " << orderCopy.stopPrice.value() << std::endl;
+        }
+    }
+    
+    if(modRequest.newExpiry.has_value()) {
+        orderCopy.expiry = modRequest.newExpiry;
+        std::cout << "[ModifyOrder] OrderID: " << OrderId << " expiry modified to " << std::chrono::system_clock::to_time_t(orderCopy.expiry.value()) << std::endl;
+    }
+    
+    if(modRequest.newStatus.has_value()) {
+        orderCopy.status = modRequest.newStatus.value();
+        std::cout << "[ModifyOrder] OrderID: " << OrderId << " status modified to " << orderCopy.status << std::endl;
+    }
+    
+    // According to price-time priority rules:
+    // 1. If price changes, order must be removed and re-inserted (loses queue position)
+    // 2. If quantity increases, order must be removed and re-inserted (loses queue position)
+    needsRepositioning = priceChanged || quantityIncreased;
+    
+    // Find and remove the order from its current price level
+    if(oldPrice.has_value()) {
+        if(orderCopy.isBuy) {
+            auto priceIt = buyOrders.find(oldPrice.value());
+            if(priceIt != buyOrders.end()) {
+                auto& orderQueue = priceIt->second;
+                auto orderIt = std::find_if(orderQueue.begin(), orderQueue.end(),
+                                          [OrderId](const Order& o) { return o.orderId == OrderId; });
+
+                if(orderIt != orderQueue.end()) {
+                    // Remove the order from its current position
+                    orderQueue.erase(orderIt);
+
+                    // If queue is now empty, remove the price level
+                    if(orderQueue.empty()) {
+                        buyOrders.erase(priceIt);
+                    }
+                }
+            }
+        } else {
+            auto priceIt = sellOrders.find(oldPrice.value());
+            if(priceIt != sellOrders.end()) {
+                auto& orderQueue = priceIt->second;
+                auto orderIt = std::find_if(orderQueue.begin(), orderQueue.end(),
+                                          [OrderId](const Order& o) { return o.orderId == OrderId; });
+
+                if(orderIt != orderQueue.end()) {
+                    // Remove the order from its current position
+                    orderQueue.erase(orderIt);
+
+                    // If queue is now empty, remove the price level
+                    if(orderQueue.empty()) {
+                        sellOrders.erase(priceIt);
+                    }
+                }
+            }
+        }
+    } else if(oldStopPrice.has_value()) {
+        auto& bookMap = orderCopy.isBuy ? buyStopOrders : sellStopOrders;
+        auto priceIt = bookMap.find(oldStopPrice.value());
         
-        // Update the order's price and quantity
-        order->price = newPrice;
-        order->quantity = newQuantity;
-
-        // Update the order in the appropriate book
-        if(order->isBuy){
-            buyOrders[newPrice].push_back(*order);
-            auto& orderQueue = buyOrders[newPrice];
-            orderMap[orderId] = &orderQueue.back();
-        }else{
-            sellOrders[newPrice].push_back(*order);
-            auto& orderQueue = sellOrders[newPrice];
-            orderMap[orderId] = &orderQueue.back();
+        if(priceIt != bookMap.end()) {
+            auto& orderQueue = priceIt->second;
+            auto orderIt = std::find_if(orderQueue.begin(), orderQueue.end(),
+                                      [OrderId](const Order& o) { return o.orderId == OrderId; });
+            
+            if(orderIt != orderQueue.end()) {
+                // Remove the order from its current position
+                orderQueue.erase(orderIt);
+                
+                // If queue is now empty, remove the price level
+                if(orderQueue.empty()) {
+                    bookMap.erase(priceIt);
+                }
+            }
         }
-
-
-
-
-
+    }
+    
+    // Update timestamp if we're repositioning the order due to price change or quantity increase
+    if(needsRepositioning) {
+        orderCopy.timestamp = std::chrono::high_resolution_clock::now();
+    }    // Update in allOrdersMap (our historical record)
+    if(OrderId > 0 && allOrdersMap.find(OrderId) != allOrdersMap.end()) {
+        allOrdersMap[OrderId] = orderCopy;
+    }
+    
+    // Re-insert the order at appropriate price level and update the orderMap pointer
+    // This is critical to avoid losing the pointer reference when we modify orders
+    if(orderCopy.price.has_value()) {
+        auto& orderQueue = orderCopy.isBuy ? buyOrders[orderCopy.price.value()] : sellOrders[orderCopy.price.value()];
+        orderQueue.push_back(orderCopy); // Always add to end when re-inserting
+        
+        // Update the orderMap to point to the newly inserted order
+        Order* newOrderPtr = &orderQueue.back();
+        orderMap[OrderId] = newOrderPtr;
+        
+        // Make sure we preserve the status and filled quantity from the original order
+        newOrderPtr->status = orderCopy.status;
+        newOrderPtr->filledQuantity = orderCopy.filledQuantity;
+        
+        std::cout << "[ModifyOrder] Re-inserted order " << OrderId 
+                  << " with status " << newOrderPtr->status 
+                  << ", filled qty: " << newOrderPtr->filledQuantity 
+                  << ", remaining: " << newOrderPtr->getRemainingQuantity() << std::endl;
+    } else if(orderCopy.stopPrice.has_value()) {
+        auto& orderQueue = orderCopy.isBuy ? buyStopOrders[orderCopy.stopPrice.value()] : sellStopOrders[orderCopy.stopPrice.value()];
+        orderQueue.push_back(orderCopy); // Always add to end when re-inserting
+        
+        // Update the orderMap to point to the newly inserted order
+        Order* newOrderPtr = &orderQueue.back();
+        orderMap[OrderId] = newOrderPtr;
+        
+        // Make sure we preserve the status
+        newOrderPtr->status = orderCopy.status;
+        
+        std::cout << "[ModifyOrder] Re-inserted stop order " << OrderId 
+                  << " with status " << newOrderPtr->status << std::endl;
+    } else {
+        // If the order doesn't have price or stop price, just update the order in place
+        *order = orderCopy;
+    }
+    
+    // Make sure the order pointer is updated in orderMap so it doesn't get lost
+    orderMap[OrderId] = order;
 }
-
-} // namespace ultraBook
+}
+// namespace ultraBook
 // engine.cpp

@@ -147,6 +147,125 @@ inline std::ostream& operator<<(std::ostream& os, const Trade& t) {
     return os;
 }
 
-} // namespace ultraBook
+
+
+struct OrderModificationRequest{
+    std::optional<double> newPrice;          // For LIMIT, STOP, STOP-LIMIT
+    std::optional<int> newQuantity;          // All orders
+    std::optional<OrderType> newTimeInForce; // Convert between GTC/GTD/IOC
+    std::optional<std::chrono::system_clock::time_point> newExpiryTime; // For GTD orders
+    std::optional<double> newStopPrice;      // For STOP, STOP-LIMIT
+    std::optional<int> newDisplaySize;       // For Iceberg orders
+    std::optional<int> newVisibleQuantity;   // For Iceberg orders (visible portion)
+    std::optional<int> newReplenishQuantity; // For Iceberg orders (replenish amount)
+    std::optional<std::chrono::system_clock::time_point> newExpiry; // Alternative name for expiry time
+    std::optional<OrderStatus> newStatus;    // Status updates
+
+    bool hasModifications() const{
+        return newPrice.has_value() || 
+           newQuantity.has_value() || 
+           newTimeInForce.has_value() ||
+           newExpiryTime.has_value() ||
+           newStopPrice.has_value() ||
+           newDisplaySize.has_value() ||
+           newVisibleQuantity.has_value() ||
+           newReplenishQuantity.has_value() ||
+           newExpiry.has_value() ||
+           newStatus.has_value();
+    };
+    bool validateForOrderType(OrderType type) const{
+        switch(type){
+            case OrderType::MARKET:
+                // Market orders cannot have price modifications
+                if (newPrice.has_value() || newStopPrice.has_value() || newTimeInForce.has_value() || 
+                    newExpiryTime.has_value() || newDisplaySize.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::LIMIT:
+                // Limit orders can have price and quantity modifications
+                // but cannot have stop price and display size
+                if (newStopPrice.has_value() || newDisplaySize.has_value() ||
+                    newVisibleQuantity.has_value() || newReplenishQuantity.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::STOP:
+                // Stop orders must have stop price, not regular price
+                if (newPrice.has_value() || newDisplaySize.has_value() ||
+                    newVisibleQuantity.has_value() || newReplenishQuantity.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::STOPLIMIT:
+                // Stop-limit orders can have both stop price and limit price
+                if (newDisplaySize.has_value() || newVisibleQuantity.has_value() || 
+                    newReplenishQuantity.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::FOK:
+                // Fill-or-Kill orders can have price and quantity
+                // but not time-related parameters
+                if (newStopPrice.has_value() || newTimeInForce.has_value() || 
+                    newExpiryTime.has_value() || newDisplaySize.has_value() ||
+                    newVisibleQuantity.has_value() || newReplenishQuantity.has_value() ||
+                    newExpiry.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::IOC:
+                // Immediate-or-Cancel orders can have price and quantity
+                // but not time-related parameters
+                if (newStopPrice.has_value() || newTimeInForce.has_value() || 
+                    newExpiryTime.has_value() || newDisplaySize.has_value() ||
+                    newVisibleQuantity.has_value() || newReplenishQuantity.has_value() ||
+                    newExpiry.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::GTC:
+                // Good-Till-Canceled orders can have price, quantity, and time in force
+                // but not expiry time (that would make it GTD)
+                if (newStopPrice.has_value() || newExpiryTime.has_value() || 
+                    newDisplaySize.has_value() || newVisibleQuantity.has_value() || 
+                    newReplenishQuantity.has_value() || newExpiry.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::GTD:
+                // Good-Till-Date orders can have all parameters except stop price
+                // and display size
+                if (newStopPrice.has_value() || newDisplaySize.has_value() ||
+                    newVisibleQuantity.has_value() || newReplenishQuantity.has_value()) {
+                    return false;
+                }
+                break;
+
+            case OrderType::ICE:
+                // Iceberg orders can have all parameters including display size
+                // but not stop price
+                if (newStopPrice.has_value()) {
+                    return false;
+                }
+                break;
+
+            default:
+                // Unknown order type, reject modifications
+                return false;
+        }
+        
+        return true;
+    };
+};
+
+}// namespace ultraBook
 
 #endif
