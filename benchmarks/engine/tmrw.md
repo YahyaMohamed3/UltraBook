@@ -28,6 +28,19 @@ This document defines the official baseline benchmarks for ULTRABOOK's order mat
 
 ## ⚙️ Benchmarking Strategy
 
+### 0. **Windows Setup Script**
+
+Run the provided setup script before benchmarking:
+```bash
+# Run as Administrator
+./setup_benchmark_environment.bat
+```
+
+This script will:
+- Set Windows to High Performance power plan
+- Disable CPU parking (keeps all cores active)
+- Provide instructions for running with high priority
+
 ### 1. Input Size Guidelines
 
 - Use **large batches (10,000)** for throughput-related benchmarks.

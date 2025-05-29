@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include "debug.hpp"
 #include <iostream>
 #include <algorithm> 
 #include "types.hpp"
@@ -22,13 +23,13 @@ MatchingEngine::MatchingEngine() = default;
 void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bool isBuy){
     // Validate order parameters
     if(quantity <= 0 || price <= 0){
-        std::cerr <<"Invalid order: please make sure that the price and the quantity are greater than 0." << std::endl;
+        ENGINE_ERROR("Invalid order: please make sure that the price and the quantity are greater than 0.");
         return;
     }
-    std::cout<<"[addLimitOrder] OrderID: "<<orderId
-             <<" , Price: "<< price
-             <<" , Qty: "<<quantity
-             <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
+    ENGINE_LOG("[addLimitOrder] OrderID: " << orderId
+             << " , Price: " << price
+             << " , Qty: " << quantity
+             << ", Side: " << (isBuy ? "Buy" : "Sell"));
 
     // Create a new order object
     Order newOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::LIMIT);
@@ -67,13 +68,13 @@ void MatchingEngine::addLimitOrder(int orderId , double price, int quantity , bo
 void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy, bool isConverted, Order* existingOrder) {
     // Validate order parameters
     if(quantity <= 0) {
-        std::cerr << "Invalid order: Qty must be bigger than 0." << std::endl;
+        ENGINE_ERROR("Invalid order: Qty must be bigger than 0." );
         return;
     }
 
-    std::cout << "[Market Order] OrderID: " << orderId
+    ENGINE_LOG("[Market Order] OrderID: " << orderId
               << ", quantity: " << quantity
-              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
+              << ", Side: " << (isBuy ? "Buy" : "Sell") );
 
     // Order pointer setup - either create new order or use existing one
     Order* marketOrderPtr = nullptr;
@@ -104,10 +105,10 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy, bool 
             
             double tradePrice = sellOrders.begin()->first;
             
-            std::cout<<"[Market Buy] OrderID: "<<orderId
+            ENGINE_LOG("[Market Buy] OrderID: "<<orderId
                      <<" matched with SellOrder "<<sellOrder.orderId
                      <<" at price "<<tradePrice
-                     <<" for Qty "<< tradeQty<<std::endl;
+                     <<" for Qty "<< tradeQty);
 
             // Create and record the trade
             Trade trade(orderId, sellOrder.orderId, tradePrice, tradeQty);
@@ -149,10 +150,10 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy, bool 
             
             double tradePrice = buyOrders.begin()->first;
             
-            std::cout<<"Match [Market Sell] OrderID: "<<orderId
+            ENGINE_LOG("Match [Market Sell] OrderID: "<<orderId
                      <<" matched with "<<buyOrder.orderId
                      <<" at price "<<tradePrice
-                     <<" for Qty "<<tradeQty<<std::endl;
+                     <<" for Qty "<<tradeQty);
 
             // Create and record the trade
             Trade trade(buyOrder.orderId, orderId, tradePrice, tradeQty);
@@ -186,14 +187,14 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy, bool 
     // Update market order status based on execution
     if (remainingQty == quantity) {
         setOrderStatus(marketOrderPtr, OrderStatus::CANCELED);
-        std::cout << "[Market Order] No matching orders found, Order: "<<orderId<<" canceled." << std::endl;
+        ENGINE_LOG("[Market Order] No matching orders found, Order: "<<orderId<<" canceled." );
     } else if (remainingQty > 0) {
         setOrderStatus(marketOrderPtr, OrderStatus::PARTIALLY_FILLED);
-        std::cout << "[Market Order] OrderID: "<<orderId<<" Partially filled: " << (quantity - remainingQty) 
-                 << " filled, " << remainingQty << " remaining (canceled)" << std::endl;
+        ENGINE_LOG("[Market Order] OrderID: "<<orderId<<" Partially filled: " << (quantity - remainingQty) 
+                 << " filled, " << remainingQty << " remaining (canceled)" );
     } else {
         setOrderStatus(marketOrderPtr, OrderStatus::FILLED);
-        std::cout << "[Market Order] OrderID: "<<orderId<<" Fully filled." << std::endl;
+        ENGINE_LOG("[Market Order] OrderID: "<<orderId<<" Fully filled." );
     }
 }
 
@@ -211,7 +212,7 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy, bool 
 void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool isBuy) {
     // Validate order parameters
     if(price <= 0 || quantity <= 0) {
-        std::cerr << "[addIOCOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        ENGINE_ERROR("[addIOCOrder] Invalid Order: please make sure price and quantity are bigger than 0." );
         return;
     }
 
@@ -220,10 +221,10 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
     allOrdersMap[orderId] = iocOrder;
     Order* orderPtr = &allOrdersMap[orderId];
     
-    std::cout << "[IOC Order] OrderID: " << orderId
+    ENGINE_LOG("[IOC Order] OrderID: " << orderId
               << ", Price: " << price
               << ", Qty: " << quantity
-              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
+              << ", Side: " << (isBuy ? "Buy" : "Sell") );
 
     int remainingQty = quantity;
     if(isBuy) {
@@ -239,10 +240,10 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
                 sellOrder.filledQuantity += tradeQty;
                 orderPtr->filledQuantity += tradeQty;
 
-                std::cout << "[IOC Match] OrderID: " << orderId
+                ENGINE_LOG("[IOC Match] OrderID: " << orderId
                          << " matched with sellOrder: " << sellOrder.orderId
                          << " for QTY: " << tradeQty
-                         << " at price: " << lowestPrice << std::endl;
+                         << " at price: " << lowestPrice );
 
                 // Create and record the trade
                 Trade trade(orderId, sellOrder.orderId, lowestPrice, tradeQty);
@@ -282,10 +283,10 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
                 buyOrder.filledQuantity += tradeQty;
                 orderPtr->filledQuantity += tradeQty;
 
-                std::cout << "[IOC Match] OrderID: " << orderId
+                ENGINE_LOG("[IOC Match] OrderID: " << orderId
                          << " matched with buyOrder: " << buyOrder.orderId
                          << " for QTY: " << tradeQty
-                         << " at price: " << highestPrice << std::endl;
+                         << " at price: " << highestPrice );
 
                 // Create and record the trade
                 Trade trade(buyOrder.orderId, orderId, highestPrice, tradeQty);
@@ -317,15 +318,15 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
     // Update IOC order status based on execution
     if(orderPtr->filledQuantity == 0) {
         setOrderStatus(orderPtr, OrderStatus::CANCELED);
-        std::cout << "[IOC Order] OrderID: " << orderId << " canceled - no matches at specified price" << std::endl;
+        ENGINE_LOG("[IOC Order] OrderID: " << orderId << " canceled - no matches at specified price" );
     } else if(orderPtr->getRemainingQuantity() > 0) {
         setOrderStatus(orderPtr, OrderStatus::PARTIALLY_FILLED);
-        std::cout << "[IOC Order] OrderID: " << orderId 
+        ENGINE_LOG("[IOC Order] OrderID: " << orderId 
                  << " partially filled: " << orderPtr->filledQuantity 
-                 << " of " << quantity << " shares. Remaining canceled." << std::endl;
+                 << " of " << quantity << " shares. Remaining canceled." );
     } else {
         setOrderStatus(orderPtr, OrderStatus::FILLED);
-        std::cout << "[IOC Order] OrderID: " << orderId << " fully filled." << std::endl;
+        ENGINE_LOG("[IOC Order] OrderID: " << orderId << " fully filled." );
     }
 }
 
@@ -352,10 +353,10 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
     allOrdersMap[orderId] = fokOrder;
     Order* orderPtr = &allOrdersMap[orderId];
     
-    std::cout<<"[FOK Order] OrderID: "<<orderId
+    ENGINE_LOG("[FOK Order] OrderID: "<<orderId
              <<", Price: "<<price
              <<", Qty: "<<quantity
-             <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
+             <<", Side: "<<(isBuy ? "Buy" : "Sell") );
 
     // First check if full quantity can be executed at the specified price
     int availableQty = 0;
@@ -383,8 +384,8 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
     // If can't fill entire quantity, cancel the order
     if (availableQty < quantity) {
         setOrderStatus(orderPtr, OrderStatus::CANCELED);
-        std::cout << "[FOK Order] OrderID: " << orderId 
-                 << " canceled - insufficient quantity available at price " << price << std::endl;
+        ENGINE_LOG("[FOK Order] OrderID: " << orderId 
+                 << " canceled - insufficient quantity available at price " << price );
         return;
     }
 
@@ -402,8 +403,8 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             if (execPrice > price) {
                 // Price moved unfavorably
                 setOrderStatus(orderPtr, OrderStatus::CANCELED);
-                std::cout << "[FOK Order] OrderID: " << orderId 
-                         << " canceled - price moved unfavorably" << std::endl;
+                ENGINE_LOG("[FOK Order] OrderID: " << orderId 
+                         << " canceled - price moved unfavorably" );
                 return;
             }
 
@@ -424,9 +425,9 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             // Check if any stop orders should be triggered by this trade
             checkandTrigger(lastPrice);
 
-            std::cout << "[FOK Match] Buy OrderID: " << orderId 
+            ENGINE_LOG("[FOK Match] Buy OrderID: " << orderId 
                      << " matched with Sell OrderID: " << sellOrder.orderId
-                     << " for " << tradeQty << " at " << execPrice << std::endl;
+                     << " for " << tradeQty << " at " << execPrice );
 
             // Update sell order status
             if (sellOrder.getRemainingQuantity() > 0) {
@@ -455,8 +456,8 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             if (execPrice < price) {
                 // Price moved unfavorably
                 setOrderStatus(orderPtr, OrderStatus::CANCELED);
-                std::cout << "[FOK Order] OrderID: " << orderId 
-                         << " canceled - price moved unfavorably" << std::endl;
+                ENGINE_LOG("[FOK Order] OrderID: " << orderId 
+                         << " canceled - price moved unfavorably" );
                 return;
             }
 
@@ -477,9 +478,9 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
             // Check if any stop orders should be triggered by this trade
             checkandTrigger(lastPrice);
 
-            std::cout << "[FOK Match] Sell OrderID: " << orderId 
+            ENGINE_LOG("[FOK Match] Sell OrderID: " << orderId 
                      << " matched with Buy OrderID: " << buyOrder.orderId
-                     << " for " << tradeQty << " at " << execPrice << std::endl;
+                     << " for " << tradeQty << " at " << execPrice );
 
             // Update buy order status
             if (buyOrder.getRemainingQuantity() > 0) {
@@ -501,7 +502,7 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
     
     // FOK is fully filled at this point
     setOrderStatus(orderPtr, OrderStatus::FILLED);
-    std::cout << "[FOK Order] OrderID: " << orderId << " fully filled" << std::endl;
+    ENGINE_LOG("[FOK Order] OrderID: " << orderId << " fully filled" );
 }
 
 /**
@@ -518,13 +519,13 @@ void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool i
 void MatchingEngine::addGTCOrder(int orderId, double price , int quantity, bool isBuy){
     // Validate order parameters
     if(quantity <= 0 || price <= 0) {
-        std::cerr << "[addGTCOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        ENGINE_ERROR("[addGTCOrder] Invalid Order: please make sure price and quantity are bigger than 0." );
         return;
     }
-    std::cout << "[GTC Order] OrderID: " << orderId
+    ENGINE_LOG("[GTC Order] OrderID: " << orderId
               << ", Price: " << price
               << ", Qty: " << quantity
-              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
+              << ", Side: " << (isBuy ? "Buy" : "Sell") );
     
     // Create GTC order and store in allOrdersMap and appropriate order book
     Order gtcOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::GTC);
@@ -556,14 +557,14 @@ void MatchingEngine::addGTCOrder(int orderId, double price , int quantity, bool 
 void MatchingEngine::addGTDOrder(int orderId, double price, int quantity, bool isBuy, std::chrono::system_clock::time_point expiry){
     // Validate order parameters
     if(quantity <= 0 || price <= 0) {
-        std::cerr << "[addGTDOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        ENGINE_ERROR("[addGTDOrder] Invalid Order: please make sure price and quantity are bigger than 0." );
         return;
     }
-    std::cout << "[GTD Order] OrderID: " << orderId
+    ENGINE_LOG("[GTD Order] OrderID: " << orderId
               << ", Price: " << price
               << ", Qty: " << quantity
               << ", Side: " << (isBuy ? "Buy" : "Sell") 
-              << ", Expiry: " << std::chrono::system_clock::to_time_t(expiry) << std::endl;
+              << ", Expiry: " << std::chrono::system_clock::to_time_t(expiry) );
     
     // Create GTD order and store in allOrdersMap and appropriate order book
     Order gtdOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::GTD, expiry);
@@ -596,13 +597,13 @@ void MatchingEngine::addGTDOrder(int orderId, double price, int quantity, bool i
 void MatchingEngine::addStopOrder(int orderId, double stopPrice, int quantity, bool isBuy){
     // Validate order parameters
     if(quantity <= 0 || stopPrice <= 0){
-        std::cerr << "[addStopOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        ENGINE_ERROR("[addStopOrder] Invalid Order: please make sure price and quantity are bigger than 0." );
         return;
     }
-    std::cout << "[Stop Order] OrderID: " << orderId
+    ENGINE_LOG("[Stop Order] OrderID: " << orderId
               << ", Stop Price: " << stopPrice
               << ", Qty: " << quantity
-              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
+              << ", Side: " << (isBuy ? "Buy" : "Sell") );
     
     // Create Stop order and store in allOrdersMap and appropriate stop order book
     Order stopOrder(orderId, std::nullopt, quantity, isBuy, OrderType::STOP, 
@@ -630,7 +631,7 @@ void MatchingEngine::addStopOrder(int orderId, double stopPrice, int quantity, b
  * @param lastprice The most recent trade price
  */
 void MatchingEngine::checkandTrigger(double lastprice){
-    std::cout<<"[checkandTrigger] Last Price: "<<lastprice<<std::endl;
+    ENGINE_LOG("[checkandTrigger] Last Price: "<<lastprice);
     
     // Check buy stop orders (trigger when price rises above stop price)
     auto it = buyStopOrders.begin();
@@ -640,14 +641,14 @@ void MatchingEngine::checkandTrigger(double lastprice){
         if(stopOrder.stopPrice && lastprice >= stopOrder.stopPrice.value()){
             stopOrder.status = OrderStatus::TRIGGERED;
             if(stopOrder.type == OrderType::STOP){
-                std::cout<<"[checkandTrigger] Buy Stop OrderID: "<<stopOrder.orderId
-                         <<" triggered at price "<<lastprice<<std::endl;
+                ENGINE_LOG("[checkandTrigger] Buy Stop OrderID: "<<stopOrder.orderId
+                         <<" triggered at price "<<lastprice);
                 // Don't erase from orderMap here - convertStopToMarket handles this
                 convertStopToMarket(&stopOrder);
             }
             else if(stopOrder.type == OrderType::STOPLIMIT){
-                std::cout<<"[checkandTrigger] Buy Stop Limit OrderID: "<<stopOrder.orderId
-                         <<" triggered at price "<<lastprice<<std::endl;
+                ENGINE_LOG("[checkandTrigger] Buy Stop Limit OrderID: "<<stopOrder.orderId
+                         <<" triggered at price "<<lastprice);
                 // Don't erase from orderMap here - convertStopToLimit handles this
                 convertStopToLimit(&stopOrder);
             }
@@ -671,14 +672,14 @@ void MatchingEngine::checkandTrigger(double lastprice){
         if(stopOrder.stopPrice && lastprice <= stopOrder.stopPrice.value()){
             stopOrder.status = OrderStatus::TRIGGERED;
             if(stopOrder.type == OrderType::STOP){
-                std::cout<<"[checkandTrigger] Sell Stop OrderID: "<<stopOrder.orderId
-                         <<" triggered at price "<<lastprice<<std::endl;
+                ENGINE_LOG("[checkandTrigger] Sell Stop OrderID: "<<stopOrder.orderId
+                         <<" triggered at price "<<lastprice);
                 // Don't erase from orderMap here - convertStopToMarket handles this
                 convertStopToMarket(&stopOrder);
             }
             else if(stopOrder.type == OrderType::STOPLIMIT){
-                std::cout<<"[checkandTrigger] Sell Stop Limit OrderID: "<<stopOrder.orderId
-                         <<" triggered at price "<<lastprice<<std::endl;
+                ENGINE_LOG("[checkandTrigger] Sell Stop Limit OrderID: "<<stopOrder.orderId
+                         <<" triggered at price "<<lastprice);
                 // Don't erase from orderMap here - convertStopToLimit handles this
                 convertStopToLimit(&stopOrder);
             }
@@ -710,14 +711,14 @@ void MatchingEngine::checkandTrigger(double lastprice){
 void MatchingEngine::addStopLimitOrder(int orderId, double stopPrice, double limitPrice, int quantity, bool isBuy) {
     // Validate order parameters
     if (quantity <= 0 || stopPrice <= 0 || limitPrice <= 0) {
-        std::cerr << "[addStopLimitOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        ENGINE_ERROR("[addStopLimitOrder] Invalid Order: please make sure price and quantity are bigger than 0." );
         return;
     }
-    std::cout << "[Stop Limit Order] OrderID: " << orderId
+    ENGINE_LOG("[Stop Limit Order] OrderID: " << orderId
               << ", Stop Price: " << stopPrice
               << ", Limit Price: " << limitPrice
               << ", Qty: " << quantity
-              << ", Side: " << (isBuy ? "Buy" : "Sell") << std::endl;
+              << ", Side: " << (isBuy ? "Buy" : "Sell") );
     
     // Create Stop Limit order and store in allOrdersMap and appropriate stop order book
     Order stopLimitOrder(orderId, std::optional<double>{limitPrice}, quantity, isBuy, OrderType::STOPLIMIT, 
@@ -745,7 +746,7 @@ void MatchingEngine::addStopLimitOrder(int orderId, double stopPrice, double lim
  */
 void MatchingEngine::convertStopToMarket(Order* order) {
     if (order->status == OrderStatus::TRIGGERED) {
-        std::cout << "[convertStopToMarket] Converting Stop OrderID: " << order->orderId << " to Market Order." << std::endl;
+        ENGINE_LOG("[convertStopToMarket] Converting Stop OrderID: " << order->orderId << " to Market Order." );
         
         order->type = OrderType::MARKET;  // Change the type to MARKET
         order->price = std::nullopt;      // No price for market orders
@@ -778,8 +779,8 @@ void MatchingEngine::convertStopToMarket(Order* order) {
 void MatchingEngine::convertStopToLimit(Order* order) {
     if (order->status == OrderStatus::TRIGGERED) {
         // We need to use the original limit price (order->price) not the stop price
-        std::cout << "[convertStopToLimit] Converting Stop Limit OrderID: " << order->orderId 
-                  << " to Limit Order at price: " << order->price.value() << std::endl;
+        ENGINE_LOG("[convertStopToLimit] Converting Stop Limit OrderID: " << order->orderId 
+                  << " to Limit Order at price: " << order->price.value() );
 
         // Store original values we need to preserve
         int orderId = order->orderId;
@@ -833,15 +834,15 @@ void MatchingEngine::convertStopToLimit(Order* order) {
 void MatchingEngine::addIcebergOrder(int orderId, double price , int quantity, int visibleQuantity, int replenishQuantity , bool isBuy){
     // Validate order parameters
     if(quantity <= 0 || visibleQuantity <= 0 || price <= 0 || replenishQuantity <= 0){
-        std::cerr << "[addIcebergOrder] Invalid Order: please make sure price and quantity are bigger than 0." << std::endl;
+        ENGINE_ERROR("[addIcebergOrder] Invalid Order: please make sure price and quantity are bigger than 0." );
         return;
     }
-    std::cout<<"[Iceberg Order] OrderID: "<<orderId
+    ENGINE_LOG("[Iceberg Order] OrderID: "<<orderId
                 <<" , Price: "<<price
                 <<" , Total Qty: "<<quantity
                 <<" , Visible Qty: "<<visibleQuantity
                 <<" , Replenish Qty: "<<replenishQuantity
-                <<", Side: "<<(isBuy ? "Buy" : "Sell") << std::endl;
+                <<", Side: "<<(isBuy ? "Buy" : "Sell") );
                 
     // Create Iceberg order and store in allOrdersMap and appropriate order book
     Order icebergOrder(orderId, std::optional<double>{price}, quantity, isBuy, OrderType::ICE, 
@@ -882,9 +883,9 @@ void MatchingEngine::replenishIcebergOrder(Order* order) {
             // Make sure to update the copy in orderMap
             orderMap[order->orderId] = order;
            
-            std::cout << "[Replenish Iceberg Order] OrderID: " << order->orderId 
+            ENGINE_LOG("[Replenish Iceberg Order] OrderID: " << order->orderId 
                       << " replenished to " << newVisibleQty << " visible shares "
-                      << "(hidden: " << (remainingQty - newVisibleQty) << ")" << std::endl;
+                      << "(hidden: " << (remainingQty - newVisibleQty) << ")" );
         }
     }
 }
@@ -895,7 +896,7 @@ void MatchingEngine::replenishIcebergOrder(Order* order) {
  */
 void MatchingEngine::printTradelog(){
     for (const auto& trade : tradeLog) {
-        std::cout << trade << '\n';
+        ENGINE_LOG(trade);
     }
 }
 
@@ -911,7 +912,7 @@ void MatchingEngine::cancelOrder(int orderId) {
     if (it != orderMap.end()) {
         Order* order = it->second;
         if(order->status == OrderStatus::FILLED) {
-            std::cout << "[cancelOrder] OrderID: " << orderId << " is already filled." << std::endl;
+            ENGINE_LOG("[cancelOrder] OrderID: " << orderId << " is already filled." );
             return;
         }
         
@@ -967,9 +968,9 @@ void MatchingEngine::cancelOrder(int orderId) {
         }
         
         orderMap.erase(it);
-        std::cout << "[cancelOrder] OrderID: " << orderId << " has been canceled." << std::endl;
+        ENGINE_LOG("[cancelOrder] OrderID: " << orderId << " has been canceled." );
     } else {
-        std::cout << "[cancelOrder] OrderID: " << orderId << " not found." << std::endl;
+        ENGINE_LOG("[cancelOrder] OrderID: " << orderId << " not found." );
     }
 }
 
@@ -981,35 +982,35 @@ void MatchingEngine::cancelOrder(int orderId) {
  * shown from highest to lowest price.
  */
 void MatchingEngine::printOrderBook() const {
-    std::cout << "====== ORDER BOOK ======" << std::endl;
+    ENGINE_LOG("====== ORDER BOOK ======");
 
     // Print sell orders (highest to lowest)
-    std::cout<<"SELL ORDERS"<<std::endl;
+    ENGINE_LOG("SELL ORDERS");
     for(auto it = sellOrders.rbegin(); it != sellOrders.rend(); ++it){
-        std::cout<<"Price: "<< it->first<<": ";
+        ENGINE_PRINT("Price: " << it->first << ": ");
         for(const auto& order : it->second){
-            std::cout<<"(OrderID "<<order.orderId << ", "<< order.quantity<< " shares) ";
-            std::cout<<"(OrderID "<<order.orderId 
-                    << ", "<< order.quantity<< " shares"
-                    << ", Status: " << order.status << ") ";
+            ENGINE_PRINT("(OrderID " << order.orderId << ", " << order.quantity << " shares) ");
+            ENGINE_PRINT("(OrderID " << order.orderId 
+                    << ", " << order.quantity << " shares"
+                    << ", Status: " << order.status << ") ");
         }
-        std::cout <<std::endl;
+        ENGINE_LOG("");
     }
 
     // Print buy orders (highest to lowest)
-    std::cout<<"BUY ORDERS"<<std::endl;
+    ENGINE_LOG("BUY ORDERS");
     for(const auto& [price , orders] : buyOrders){
-        std::cout<<"Price: "<<price<<": ";
+        ENGINE_PRINT("Price: " << price << ": ");
         for(const auto& order: orders){
-            std::cout<<"(OrderID "<<order.orderId<<", "<< order.quantity<<" shares) ";
-            std::cout<<"(OrderID "<<order.orderId
-                    <<", "<< order.quantity<<" shares"
-                    << ", Status: " << order.status << ") ";
+            ENGINE_PRINT("(OrderID " << order.orderId << ", " << order.quantity << " shares) ");
+            ENGINE_PRINT("(OrderID " << order.orderId
+                    << ", " << order.quantity << " shares"
+                    << ", Status: " << order.status << ") ");
         }
-        std::cout<<std::endl;
+        ENGINE_LOG("");
     }
 
-    std::cout << "======================" << std::endl;
+    ENGINE_LOG("======================");
 }
 
 /**
@@ -1019,7 +1020,7 @@ void MatchingEngine::printOrderBook() const {
  * Continues matching until no more matches are possible.
  */
 void MatchingEngine::matchOrders() {
-    std::cout << "[matchOrders] Attempting to match orders..." << std::endl;
+    ENGINE_LOG("[matchOrders] Attempting to match orders..." );
     bool matchFound = true;
 
     while (matchFound) {
@@ -1046,8 +1047,8 @@ void MatchingEngine::matchOrders() {
             if(buyOrder.type == OrderType::GTD && buyOrder.expiry.has_value()) {
                 if (std::chrono::system_clock::now() > buyOrder.expiry.value()) {
                     setOrderStatus(&buyOrder, OrderStatus::EXPIRED);
-                    std::cout<<"[GTD ORDER] OrderID: "<<buyOrder.orderId
-                             <<" expired at "<<std::chrono::system_clock::to_time_t(buyOrder.expiry.value())<<std::endl;
+                    ENGINE_LOG("[GTD ORDER] OrderID: "<<buyOrder.orderId
+                             <<" expired at "<<std::chrono::system_clock::to_time_t(buyOrder.expiry.value()));
                     orderMap.erase(buyOrder.orderId);
                     buyQueue.pop_front();
                     if(buyQueue.empty()) {
@@ -1059,8 +1060,8 @@ void MatchingEngine::matchOrders() {
             if(sellOrder.type == OrderType::GTD && sellOrder.expiry.has_value()) {
                 if (std::chrono::system_clock::now() > sellOrder.expiry.value()) {
                     setOrderStatus(&sellOrder, OrderStatus::EXPIRED);
-                    std::cout<<"[GTD ORDER] OrderID: "<<sellOrder.orderId
-                             <<" expired at "<<std::chrono::system_clock::to_time_t(sellOrder.expiry.value())<<std::endl;
+                    ENGINE_LOG("[GTD ORDER] OrderID: "<<sellOrder.orderId
+                             <<" expired at "<<std::chrono::system_clock::to_time_t(sellOrder.expiry.value()));
                     orderMap.erase(sellOrder.orderId);
                     sellQueue.pop_front();
                     if(sellQueue.empty()) {
@@ -1081,17 +1082,17 @@ void MatchingEngine::matchOrders() {
             }
             
             // Debug the matching process
-            std::cout << "[DEBUG MATCH] BuyOrder " << buyOrder.orderId 
+            ENGINE_LOG("[DEBUG MATCH] BuyOrder " << buyOrder.orderId 
                       << " (remaining: " << buyOrder.getRemainingQuantity() << ")"
                       << " matched with SellOrder " << sellOrder.orderId
                       << " (remaining: " << sellOrder.getRemainingQuantity() << ")"
                       << " at price " << lowestSellPrice
-                      << " for quantity " << tradeQty << std::endl;
+                      << " for quantity " << tradeQty );
 
-            std::cout << "[MATCH] BuyOrder " << buyOrder.orderId 
+            ENGINE_LOG("[MATCH] BuyOrder " << buyOrder.orderId 
                       << " matched with SellOrder " << sellOrder.orderId
                       << " at price " << lowestSellPrice
-                      << " for quantity " << tradeQty << std::endl;
+                      << " for quantity " << tradeQty );
 
             // Create and record the trade
             Trade trade(buyOrder.orderId, sellOrder.orderId, lowestSellPrice, tradeQty);
@@ -1162,7 +1163,7 @@ void MatchingEngine::matchOrders() {
     }
 
     if (!matchFound) {
-        std::cout << "[matchOrders] No matches found." << std::endl;
+        ENGINE_LOG("[matchOrders] No matches found." );
     }
 }
 
@@ -1176,7 +1177,7 @@ void MatchingEngine::matchOrders() {
  */
 void MatchingEngine::setOrderStatus(Order* order, OrderStatus newStatus) {
     if (!order) {
-        std::cerr << "Error: Cannot set status on null order" << std::endl;
+        ENGINE_ERROR("Error: Cannot set status on null order" );
         return;
     }
 
@@ -1188,9 +1189,9 @@ void MatchingEngine::setOrderStatus(Order* order, OrderStatus newStatus) {
         allOrdersMap[order->orderId].status = newStatus;
     }
     
-    std::cout << "[Status Update] OrderID: " << order->orderId 
+    ENGINE_LOG("[Status Update] OrderID: " << order->orderId 
               << " Status changed from " << oldStatus 
-              << " to " << newStatus << std::endl;
+              << " to " << newStatus );
 }
 
 /**
@@ -1225,7 +1226,7 @@ OrderStatus MatchingEngine::getOrderStatus(int orderId) const {
  * expiration time and removes them.
  */
 void MatchingEngine::checkExpiredOrders() {
-    std::cout << "[checkExpiredOrders] Checking for expired GTD orders..." << std::endl;
+    ENGINE_LOG("[checkExpiredOrders] Checking for expired GTD orders..." );
     
     auto currentTime = std::chrono::system_clock::now();
     bool expiredOrdersFound = false;
@@ -1239,8 +1240,8 @@ void MatchingEngine::checkExpiredOrders() {
             if (orderIt->type == OrderType::GTD && orderIt->expiry.has_value() && 
                 currentTime > orderIt->expiry.value()) {
                 
-                std::cout << "[GTD ORDER] OrderID: " << orderIt->orderId
-                          << " expired at " << std::chrono::system_clock::to_time_t(orderIt->expiry.value()) << std::endl;
+                ENGINE_LOG("[GTD ORDER] OrderID: " << orderIt->orderId
+                          << " expired at " << std::chrono::system_clock::to_time_t(orderIt->expiry.value()) );
                 
                 Order* orderPtr = &(*orderIt);
                 setOrderStatus(orderPtr, OrderStatus::EXPIRED);
@@ -1269,8 +1270,8 @@ void MatchingEngine::checkExpiredOrders() {
             if (orderIt->type == OrderType::GTD && orderIt->expiry.has_value() && 
                 currentTime > orderIt->expiry.value()) {
                 
-                std::cout << "[GTD ORDER] OrderID: " << orderIt->orderId
-                          << " expired at " << std::chrono::system_clock::to_time_t(orderIt->expiry.value()) << std::endl;
+                ENGINE_LOG("[GTD ORDER] OrderID: " << orderIt->orderId
+                          << " expired at " << std::chrono::system_clock::to_time_t(orderIt->expiry.value()) );
                 
                 Order* orderPtr = &(*orderIt);
                 setOrderStatus(orderPtr, OrderStatus::EXPIRED);
@@ -1291,7 +1292,7 @@ void MatchingEngine::checkExpiredOrders() {
     }
     
     if (!expiredOrdersFound) {
-        std::cout << "[checkExpiredOrders] No expired orders found." << std::endl;
+        ENGINE_LOG("[checkExpiredOrders] No expired orders found." );
     }
 }
 
@@ -1301,13 +1302,13 @@ void MatchingEngine::checkExpiredOrders() {
 void MatchingEngine::ModifyOrder(int OrderId, const OrderModificationRequest& modRequest) {
     auto it = orderMap.find(OrderId);
     if(it == orderMap.end() || !it->second) {
-        std::cerr << "[ModifyOrder] OrderID: " << OrderId << " not found." << std::endl;
+        ENGINE_ERROR("[ModifyOrder] OrderID: " << OrderId << " not found." );
         return;
     }
     
     Order* order = it->second;
     if(order->status == OrderStatus::FILLED) {
-        std::cout << "[ModifyOrder] OrderID: " << OrderId << " is already filled." << std::endl;
+        ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " is already filled." );
         return;
     }
     
@@ -1327,7 +1328,7 @@ void MatchingEngine::ModifyOrder(int OrderId, const OrderModificationRequest& mo
         if(order->price != modRequest.newPrice) {
             orderCopy.price = modRequest.newPrice;
             priceChanged = true;
-            std::cout << "[ModifyOrder] OrderID: " << OrderId << " price modified to " << orderCopy.price.value() << std::endl;
+            ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " price modified to " << orderCopy.price.value() );
         }
     }
     
@@ -1337,35 +1338,35 @@ void MatchingEngine::ModifyOrder(int OrderId, const OrderModificationRequest& mo
             quantityIncreased = true;
         }
         orderCopy.quantity = newQty;
-        std::cout << "[ModifyOrder] OrderID: " << OrderId << " quantity modified to " << orderCopy.quantity << std::endl;
+        ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " quantity modified to " << orderCopy.quantity );
     }
     
     if(modRequest.newVisibleQuantity.has_value()) {
         orderCopy.visibleQuantity = modRequest.newVisibleQuantity;
-        std::cout << "[ModifyOrder] OrderID: " << OrderId << " visible quantity modified to " << orderCopy.visibleQuantity.value() << std::endl;
+        ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " visible quantity modified to " << orderCopy.visibleQuantity.value() );
     }
     
     if(modRequest.newReplenishQuantity.has_value()) {
         orderCopy.replenishQuantity = modRequest.newReplenishQuantity;
-        std::cout << "[ModifyOrder] OrderID: " << OrderId << " replenish quantity modified to " << orderCopy.replenishQuantity.value() << std::endl;
+        ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " replenish quantity modified to " << orderCopy.replenishQuantity.value() );
     }
     
     if(modRequest.newStopPrice.has_value()) {
         if(order->stopPrice != modRequest.newStopPrice) {
             orderCopy.stopPrice = modRequest.newStopPrice;
             priceChanged = true;
-            std::cout << "[ModifyOrder] OrderID: " << OrderId << " stop price modified to " << orderCopy.stopPrice.value() << std::endl;
+            ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " stop price modified to " << orderCopy.stopPrice.value() );
         }
     }
     
     if(modRequest.newExpiry.has_value()) {
         orderCopy.expiry = modRequest.newExpiry;
-        std::cout << "[ModifyOrder] OrderID: " << OrderId << " expiry modified to " << std::chrono::system_clock::to_time_t(orderCopy.expiry.value()) << std::endl;
+        ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " expiry modified to " << std::chrono::system_clock::to_time_t(orderCopy.expiry.value()) );
     }
     
     if(modRequest.newStatus.has_value()) {
         orderCopy.status = modRequest.newStatus.value();
-        std::cout << "[ModifyOrder] OrderID: " << OrderId << " status modified to " << orderCopy.status << std::endl;
+        ENGINE_LOG("[ModifyOrder] OrderID: " << OrderId << " status modified to " << orderCopy.status );
     }
     
     // According to price-time priority rules:
@@ -1453,10 +1454,10 @@ void MatchingEngine::ModifyOrder(int OrderId, const OrderModificationRequest& mo
         newOrderPtr->status = orderCopy.status;
         newOrderPtr->filledQuantity = orderCopy.filledQuantity;
         
-        std::cout << "[ModifyOrder] Re-inserted order " << OrderId 
+        ENGINE_LOG("[ModifyOrder] Re-inserted order " << OrderId 
                   << " with status " << newOrderPtr->status 
                   << ", filled qty: " << newOrderPtr->filledQuantity 
-                  << ", remaining: " << newOrderPtr->getRemainingQuantity() << std::endl;
+                  << ", remaining: " << newOrderPtr->getRemainingQuantity() );
     } else if(orderCopy.stopPrice.has_value()) {
         auto& orderQueue = orderCopy.isBuy ? buyStopOrders[orderCopy.stopPrice.value()] : sellStopOrders[orderCopy.stopPrice.value()];
         orderQueue.push_back(orderCopy); // Always add to end when re-inserting
@@ -1468,8 +1469,8 @@ void MatchingEngine::ModifyOrder(int OrderId, const OrderModificationRequest& mo
         // Make sure we preserve the status
         newOrderPtr->status = orderCopy.status;
         
-        std::cout << "[ModifyOrder] Re-inserted stop order " << OrderId 
-                  << " with status " << newOrderPtr->status << std::endl;
+        ENGINE_LOG("[ModifyOrder] Re-inserted stop order " << OrderId 
+                  << " with status " << newOrderPtr->status );
     } else {
         // If the order doesn't have price or stop price, just update the order in place
         *order = orderCopy;

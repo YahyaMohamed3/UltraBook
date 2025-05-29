@@ -170,6 +170,14 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
   )
 endif()
 
+# Add BENCHMARK_MODE definition to disable logging in benchmarks
+# This significantly improves benchmark performance by eliminating I/O overhead
+target_compile_definitions(matching_engine_benchmarks PRIVATE BENCHMARK_MODE)
+target_compile_definitions(basic_benchmarks PRIVATE BENCHMARK_MODE)
+
+# Ensure tests do NOT have BENCHMARK_MODE (so they can still print debug info)
+target_compile_definitions(matching_engine_tests PRIVATE DEBUG_MODE)
+
 # Add custom target for running benchmarks
 add_custom_target(run_benchmarks
     COMMAND $<TARGET_FILE:matching_engine_benchmarks>

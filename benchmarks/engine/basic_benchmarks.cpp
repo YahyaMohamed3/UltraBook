@@ -527,6 +527,46 @@ static void BM_MarketOrderExecution(benchmark::State& state) {
     
     state.SetItemsProcessed(state.iterations() * 20); // 20 market orders
 }
+// Benchmark 7: Order Modification Performance
+static void BM_OrderModification(benchmark::State& state) {
+    // Create a generator for this benchmark
+    OrderGenerator generator;
+    const int order_count = state.range(0);
+    
+    for (auto _ : state) {
+        state.PauseTiming();
+
+        ultraBook::MatchingEngine engine;
+        auto orders = generator.generateOrders(order_count);
+        std::vector<int> order_ids;
+        order_ids.reserve(order_count);
+
+        for (const auto& order : orders) {
+            engine.addLimitOrder(
+                order.orderId,
+                order.price.value(),
+                order.quantity,
+                order.isBuy
+            );
+            order_ids.push_back(order.orderId);
+        }
+
+        state.ResumeTiming();
+
+        std::uniform_real_distribution<double> price_dist(90.0, 110.0);
+        std::uniform_int_distribution<int> qty_dist(1, 100);
+        auto& rng = generator.getRng();
+
+        for (int id : order_ids) {
+            ultraBook::OrderModificationRequest mod_request;
+            mod_request.newPrice = std::optional<double>(price_dist(rng));
+            mod_request.newQuantity = qty_dist(rng);
+            engine.ModifyOrder(id, mod_request);  // ✅ Pass id separately
+        }
+    }
+
+    state.SetItemsProcessed(state.iterations() * order_count);
+}
 
 // Add a simple warmup benchmark to verify benchmark system is working
 static void BM_Warmup(benchmark::State& state) {
@@ -577,6 +617,12 @@ BENCHMARK(BM_OrderCancellation)
 BENCHMARK(BM_MarketOrderExecution)
     ->Arg(100)                    // 100 limit orders with 20 market orders
     ->Unit(benchmark::kNanosecond)   // Use ns for market order execution
+    ->Iterations(3)                  // Fixed number of iterations
+    ->ReportAggregatesOnly();
+
+BENCHMARK(BM_OrderModification)
+    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of modifications
+    ->Unit(benchmark::kMicrosecond)   // Use μs for modifications
     ->Iterations(3)                  // Fixed number of iterations
     ->ReportAggregatesOnly();
 
