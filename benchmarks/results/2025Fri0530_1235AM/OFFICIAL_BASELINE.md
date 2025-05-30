@@ -1,20 +1,41 @@
-========================================
-ULTRABOOK TRADING ENGINE - OFFICIAL BASELINE
-========================================
 
-This benchmark complies with tmrw.md methodology
+# ULTRABOOK Trading Engine - Official Baseline
 
-Timestamp: Fri 05/30/2025  0:35:12.10
-System: YMLAPTOP
-CPU: Intel64 Family 6 Model 186 Stepping 3, GenuineIntel
-Power Plan: High Performance
-CPU Parking: Disabled
-Build: Release with maximum optimizations
-BENCHMARK_MODE: Enabled (zero I/O overhead)
-Priority: High
-Iterations: 5 (aggregated results)
+This document captures the **official baseline benchmark** results for the **ULTRABOOK Trading Engine**, providing a reference point for future performance improvements. The results were obtained on:
 
-PERFORMANCE TARGETS:
-- Order Processing: >1M orders/second
-- Matching Latency: <500ns average
-- Order Book Updates: >5M updates/second
+- **Date**: 2025-05-30
+- **System**: YMLAPTOP
+- **CPU**: Intel64 Family 6 Model 186 Stepping 3, GenuineIntel
+- **Configuration**: Release mode with high-performance optimizations
+- **Power Plan**: High Performance
+- **CPU Parking**: Disabled
+- **Benchmark Mode**: Enabled (zero I/O overhead)
+- **Priority**: High
+- **Iterations**: 5 (aggregated results)
+
+## Performance Targets
+- **Order Processing**: >1M orders/second
+- **Matching Latency**: <500ns average
+- **Order Book Updates**: >5M updates/second
+
+## Benchmark Summary
+
+| Benchmark                     | Mean            | Median          | Unit      |
+|-------------------------------|-----------------|-----------------|-----------|
+| BM_MarketOrderExecution | 79.1M | 77.5M | Throughput |
+| BM_MatchingLatency | 24.8M | 25.9M | Time (ns) |
+| BM_OrderBookUpdates | 19.5M | 19.7M | Throughput |
+| BM_OrderCancellation | 27.2M | 27.5M | Throughput |
+| BM_OrderLookup | 44.9G | 46.7G | Throughput |
+| BM_OrderModification | 17.7M | 17.0M | Throughput |
+| BM_OrderProcessingThroughput | 16.4M | 17.9M | Throughput |
+
+## Performance Graph
+
+![Baseline Comparison](benchmark.png)
+
+This graph visualizes the **mean vs median performance** across benchmarks, providing a quick view of current capabilities.
+
+---
+
+This baseline serves as the reference point for **future performance comparisons**, especially when introducing engine optimizations or algorithmic improvements.
