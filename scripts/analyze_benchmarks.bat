@@ -9,43 +9,89 @@ echo Based on tmrw.md methodology and requirements
 echo.
 
 set RESULTS_FILE=%1
+
+rem If file was provided as argument, navigate to project root and use it
+if not "%RESULTS_FILE%"=="" (
+    cd /d %~dp0\..
+    goto :check_file_exists
+)
+
 if "%RESULTS_FILE%"=="" (
     echo Usage: %~nx0 [results_file.json]
     echo.
     echo Searching for most recent results...
     
-    rem Find the most recent results file
-    if exist "..\..\benchmarks\results" (
-        for /f "delims=" %%i in ('dir "..\..\benchmarks\results" /b /ad /o-d 2^>nul') do (
-            set "latest_dir=..\..\benchmarks\results\%%i"
-            goto :found_dir
+    rem Navigate to project root first
+    cd /d %~dp0\..
+    
+    rem Debug: Show current directory
+    echo Debug: Current directory is %CD%
+    
+    if exist "benchmarks\results" (
+        echo Debug: Found benchmarks\results directory
+        
+        rem Find the most recent results directory
+        set "latest_dir="
+        for /f "delims=" %%i in ('dir "benchmarks\results" /b /ad /o-d 2^>nul') do (
+            if "!latest_dir!"=="" (
+                set "latest_dir=benchmarks\results\%%i"
+                echo Debug: Latest directory found: !latest_dir!
+            )
         )
-        :found_dir
-        if exist "!latest_dir!\benchmark_results.json" (
-            set RESULTS_FILE=!latest_dir!\benchmark_results.json
-            echo Found: !RESULTS_FILE!
-        ) else if exist "!latest_dir!\official_baseline.json" (
-            set RESULTS_FILE=!latest_dir!\official_baseline.json
-            echo Found: !RESULTS_FILE!
+          rem Check if we found a directory and look for results files
+        if not "!latest_dir!"=="" (
+            echo Debug: Checking for files in !latest_dir!
+            if exist "!latest_dir!\official_baseline.json" (
+                set "RESULTS_FILE=!latest_dir!\official_baseline.json"
+                echo Found: !RESULTS_FILE!
+            ) else if exist "!latest_dir!\benchmark_results.json" (
+                set "RESULTS_FILE=!latest_dir!\benchmark_results.json"
+                echo Found: !RESULTS_FILE!
+            ) else (
+                echo Debug: No JSON files found in !latest_dir!
+                echo Debug: Directory contents:
+                dir "!latest_dir!" /b
+                set "RESULTS_FILE=!latest_dir!\official_baseline.json"
+                echo Using: !RESULTS_FILE! (may not exist)
+            )
         ) else (
-            set RESULTS_FILE=basic_benchmarks_results.json
+            echo Debug: No directories found in benchmarks\results
+            set "RESULTS_FILE=benchmarks\results\official_baseline.json"
             echo Using default: !RESULTS_FILE!
         )
     ) else (
-        set RESULTS_FILE=basic_benchmarks_results.json
+        echo Debug: benchmarks\results directory not found
+        set "RESULTS_FILE=official_baseline.json"
         echo Using default: !RESULTS_FILE!
     )
 )
 
-cd /d %~dp0
-if exist build\Release cd build\Release
+:check_file_exists
+rem Ensure we're in project root and check if file exists
+echo Debug: Checking file existence for: %RESULTS_FILE%
+echo Debug: Current directory before file check: %CD%
 
-if not exist "%RESULTS_FILE%" (
+rem Try to read the first line to verify file exists and is readable
+type "%RESULTS_FILE%" >nul 2>&1
+if %ERRORLEVEL% NEQ 0 (
     echo.
     echo ❌ Error: Results file %RESULTS_FILE% not found.
+    echo Debug: File does not exist at: %CD%\%RESULTS_FILE%
+    echo.
+    echo 💡 Available files in results directory:
+    if exist "benchmarks\results" (
+        for /d %%i in ("benchmarks\results\*") do (
+            echo    Directory: %%i
+            if exist "%%i\*.json" (
+                dir "%%i\*.json" /b 2>nul
+            ) else (
+                echo      No JSON files found
+            )
+        )
+    )
     echo.
     echo 💡 Please run benchmarks first using one of these methods:
-    echo    • scripts\benchmark.bat (unified benchmark runner)
+    echo    • benchmark.bat (unified benchmark runner)
     echo    • Or run the basic_benchmarks.exe manually with JSON output
     echo.
     pause

@@ -5,11 +5,23 @@
 #include <chrono>
 #include <atomic>
 #include <iostream>
+#include <cmath>
 #include "engine.hpp"
 
-// Constants for benchmarking
-constexpr int ORDER_COUNT_SMALL = 10000;    // Small but significant benchmark size
-constexpr int ORDER_COUNT_MEDIUM = 10000;   // Medium benchmark size for more reliable results
+// Fix Windows timer issues by explicitly setting high-resolution timer
+#ifdef _WIN32
+#include <windows.h>
+// Force Windows to use high-resolution timers
+static auto init_windows_timer = []() {
+    timeBeginPeriod(1);  // Request 1ms timer resolution
+    return 0;
+}();
+#endif
+
+// Constants for benchmarking - Optimized sizing strategy
+constexpr int THROUGHPUT_SIZE = 10000;      // Large batches for throughput measurements
+constexpr int LATENCY_SIZE = 1000;          // Smaller batches for latency measurements  
+constexpr int MICRO_LATENCY_SIZE = 100;     // Very small for ultra-low latency operations
 constexpr double PRICE_MIN = 109.9;
 constexpr double PRICE_MAX = 110.0;
 constexpr int QTY_MIN = 1;
@@ -91,11 +103,13 @@ public:
 static void BM_OrderProcessingThroughput(benchmark::State& state) {
     // Create a generator for this benchmark
     OrderGenerator generator;
-    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
         ultraBook::MatchingEngine engine;
         
         // Create a more realistic order flow with different order profiles
@@ -162,7 +176,8 @@ static void BM_OrderProcessingThroughput(benchmark::State& state) {
             );
         }
         
-        state.ResumeTiming();
+        // Manual timing for the actual work
+        auto start = std::chrono::high_resolution_clock::now();
         
         for (const auto& order : orders) {
             engine.addLimitOrder(
@@ -172,8 +187,13 @@ static void BM_OrderProcessingThroughput(benchmark::State& state) {
                 order.isBuy
             );
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
     
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * order_count);
     state.SetLabel(std::to_string(order_count) + " orders");
 }
@@ -182,12 +202,14 @@ static void BM_OrderProcessingThroughput(benchmark::State& state) {
 static void BM_MatchingLatency(benchmark::State& state) {
     // Create a generator for this benchmark
     OrderGenerator generator;
-    // No need to reset order IDs anymore, as each generator has unique IDs
     const int book_depth = state.range(0); // Number of orders in book
     const int match_count = state.range(1); // Number of orders to match
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
         
         ultraBook::MatchingEngine engine;
         
@@ -217,13 +239,12 @@ static void BM_MatchingLatency(benchmark::State& state) {
         
         int remaining_buy_orders = total_buy_orders;
         int remaining_sell_orders = total_sell_orders;
-        
-        // Place buy orders with concentration near the spread
+          // Place buy orders with concentration near the spread
         for (size_t i = 0; i < buy_price_levels.size() && remaining_buy_orders > 0; i++) {
             // Exponential decline in liquidity with distance from spread
             double price_level_factor = std::exp(-static_cast<double>(i) * 0.3);
-            int orders_at_level = static_cast<int>(std::max(1.0, price_level_factor * total_buy_orders * 0.2));
-            orders_at_level = std::min(orders_at_level, remaining_buy_orders);
+            int orders_at_level = static_cast<int>((std::max)(1.0, price_level_factor * total_buy_orders * 0.2));
+            orders_at_level = (std::min)(orders_at_level, remaining_buy_orders);
             
             // Place orders at this price level
             double price = buy_price_levels[i];
@@ -235,13 +256,12 @@ static void BM_MatchingLatency(benchmark::State& state) {
             
             remaining_buy_orders -= orders_at_level;
         }
-        
-        // Place sell orders with concentration near the spread
+          // Place sell orders with concentration near the spread
         for (size_t i = 0; i < sell_price_levels.size() && remaining_sell_orders > 0; i++) {
             // Exponential decline in liquidity with distance from spread
             double price_level_factor = std::exp(-static_cast<double>(i) * 0.3);
-            int orders_at_level = static_cast<int>(std::max(1.0, price_level_factor * total_sell_orders * 0.2));
-            orders_at_level = std::min(orders_at_level, remaining_sell_orders);
+            int orders_at_level = static_cast<int>((std::max)(1.0, price_level_factor * total_sell_orders * 0.2));
+            orders_at_level = (std::min)(orders_at_level, remaining_sell_orders);
             
             // Place orders at this price level
             double price = sell_price_levels[i];
@@ -277,10 +297,10 @@ static void BM_MatchingLatency(benchmark::State& state) {
                     false,
                     ultraBook::OrderType::LIMIT
                 );
-            }
-        }
+            }        }
         
-        state.ResumeTiming();
+        // Manual timing for the actual matching work
+        auto start = std::chrono::high_resolution_clock::now();
         
         // Add the matching orders and measure the time it takes
         for (const auto& order : matching_orders) {
@@ -291,20 +311,28 @@ static void BM_MatchingLatency(benchmark::State& state) {
                 order.isBuy
             );
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
     
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * match_count);
+    state.SetLabel(std::to_string(book_depth) + " book depth, " + std::to_string(match_count) + " matches");
 }
 
 // Benchmark 3: Order Book Updates
 static void BM_OrderBookUpdates(benchmark::State& state) {
     // Create a generator for this benchmark
     OrderGenerator generator;
-    // No need to reset order IDs anymore as we use the global counter
     const int update_count = state.range(0);
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
         
         ultraBook::MatchingEngine engine;
         
@@ -350,10 +378,10 @@ static void BM_OrderBookUpdates(benchmark::State& state) {
                     updates.emplace_back(true, order);
                     order_ids.push_back(order.orderId);
                 }
-            }
-        }
+            }        }
         
-        state.ResumeTiming();
+        // Manual timing for the actual update work
+        auto start = std::chrono::high_resolution_clock::now();
         
         // Process all the updates
         for (const auto& update : updates) {
@@ -371,8 +399,13 @@ static void BM_OrderBookUpdates(benchmark::State& state) {
                 engine.cancelOrder(update.second.orderId);
             }
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
     
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * update_count);
 }
 
@@ -380,11 +413,13 @@ static void BM_OrderBookUpdates(benchmark::State& state) {
 static void BM_OrderLookup(benchmark::State& state) {
     // Create a generator for this benchmark
     OrderGenerator generator;
-    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
         
         ultraBook::MatchingEngine engine;
         
@@ -402,19 +437,24 @@ static void BM_OrderLookup(benchmark::State& state) {
             );
             order_ids.push_back(order.orderId);
         }
-        
-        // Shuffle the order IDs to randomize lookups
+          // Shuffle the order IDs to randomize lookups
         std::shuffle(order_ids.begin(), order_ids.end(), generator.getRng());
         
-        state.ResumeTiming();
+        // Manual timing for the actual lookup work
+        auto start = std::chrono::high_resolution_clock::now();
         
         // Perform order lookups - limit to exactly order_count lookups
         for (int i = 0; i < order_count; i++) {
             int id = order_ids[i % order_ids.size()];
             benchmark::DoNotOptimize(engine.getOrderStatus(id));
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
     
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * order_count);
 }
 
@@ -422,11 +462,13 @@ static void BM_OrderLookup(benchmark::State& state) {
 static void BM_OrderCancellation(benchmark::State& state) {
     // Create a generator for this benchmark
     OrderGenerator generator;
-    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
         
         ultraBook::MatchingEngine engine;
         
@@ -441,18 +483,23 @@ static void BM_OrderCancellation(benchmark::State& state) {
                 order.price.value(),
                 order.quantity,
                 order.isBuy
-            );
-            order_ids.push_back(order.orderId);
+            );            order_ids.push_back(order.orderId);
         }
         
-        state.ResumeTiming();
+        // Manual timing for the actual cancellation work
+        auto start = std::chrono::high_resolution_clock::now();
         
         // Cancel all orders
         for (int id : order_ids) {
             engine.cancelOrder(id);
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
     
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * order_count);
 }
 
@@ -460,11 +507,13 @@ static void BM_OrderCancellation(benchmark::State& state) {
 static void BM_MarketOrderExecution(benchmark::State& state) {
     // Create a generator for this benchmark
     OrderGenerator generator;
-    // No need to reset order IDs anymore as we use the global counter
     const int order_count = state.range(0);
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
         
         ultraBook::MatchingEngine engine;
         
@@ -514,17 +563,22 @@ static void BM_MarketOrderExecution(benchmark::State& state) {
             
             // Alternate buy/sell
             bool is_buy = (i % 2 == 0);
-            market_order_sides.push_back(is_buy);
-        }
+            market_order_sides.push_back(is_buy);        }
         
-        state.ResumeTiming();
+        // Manual timing for the actual market order execution
+        auto start = std::chrono::high_resolution_clock::now();
         
         // Execute the market orders
         for (size_t i = 0; i < market_order_ids.size(); i++) {
             engine.addMarketOrder(market_order_ids[i], market_order_quantities[i], market_order_sides[i]);
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
     
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * 20); // 20 market orders
 }
 // Benchmark 7: Order Modification Performance
@@ -533,8 +587,11 @@ static void BM_OrderModification(benchmark::State& state) {
     OrderGenerator generator;
     const int order_count = state.range(0);
     
+    // Accumulate total time across all iterations for manual timing
+    std::chrono::nanoseconds total_time{0};
+    
     for (auto _ : state) {
-        state.PauseTiming();
+        // Setup phase - not timed
 
         ultraBook::MatchingEngine engine;
         auto orders = generator.generateOrders(order_count);
@@ -548,10 +605,10 @@ static void BM_OrderModification(benchmark::State& state) {
                 order.quantity,
                 order.isBuy
             );
-            order_ids.push_back(order.orderId);
-        }
+            order_ids.push_back(order.orderId);        }
 
-        state.ResumeTiming();
+        // Manual timing for the actual modification work
+        auto start = std::chrono::high_resolution_clock::now();
 
         std::uniform_real_distribution<double> price_dist(90.0, 110.0);
         std::uniform_int_distribution<int> qty_dist(1, 100);
@@ -563,8 +620,13 @@ static void BM_OrderModification(benchmark::State& state) {
             mod_request.newQuantity = qty_dist(rng);
             engine.ModifyOrder(id, mod_request);  // ✅ Pass id separately
         }
+        
+        auto end = std::chrono::high_resolution_clock::now();
+        total_time += std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
     }
 
+    // Set manual timing results
+    state.SetIterationTime(total_time.count() / static_cast<double>(state.iterations()) / 1e9);
     state.SetItemsProcessed(state.iterations() * order_count);
 }
 
@@ -582,48 +644,54 @@ BENCHMARK(BM_Warmup)
     ->Unit(benchmark::kNanosecond)
     ->Iterations(1);  // Just run once for warm-up
 
-// Register the benchmarks with more realistic sizes
-// but use fixed iterations to limit runtime
+// Register the benchmarks with optimized sizing based on purpose
 BENCHMARK(BM_OrderProcessingThroughput)
-    ->Arg(ORDER_COUNT_SMALL)      // Small but meaningful benchmark
+    ->Arg(THROUGHPUT_SIZE)           // 10,000 - Overall throughput under realistic load
     ->Unit(benchmark::kMicrosecond)  // Use μs for order processing
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 BENCHMARK(BM_MatchingLatency)
-    ->Args({100, 20})             // 100 orders in book, 20 matches
+    ->Args({100, 20})                // 100 orders in book, 20 matches - Nanosecond-level latency per match
     ->Unit(benchmark::kNanosecond)   // Use ns for latency measurements
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderBookUpdates)
-    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of updates
+    ->Arg(THROUGHPUT_SIZE)           // 10,000 - LOB structure mutation performance
     ->Unit(benchmark::kMicrosecond)  // Use μs for updates
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderLookup)
-    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of lookups
+    ->Arg(THROUGHPUT_SIZE)           // 10,000 - Lookup/search cost in active book
     ->Unit(benchmark::kNanosecond)   // Use ns for lookups
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderCancellation)
-    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of cancellations
+    ->Arg(THROUGHPUT_SIZE)           // 10,000 - Cancellation latency and cost
     ->Unit(benchmark::kNanosecond)   // Use ns for cancellations
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 BENCHMARK(BM_MarketOrderExecution)
-    ->Arg(100)                    // 100 limit orders with 20 market orders
+    ->Arg(MICRO_LATENCY_SIZE)        // 100 - Real-time responsiveness for market orders
     ->Unit(benchmark::kNanosecond)   // Use ns for market order execution
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 BENCHMARK(BM_OrderModification)
-    ->Arg(ORDER_COUNT_SMALL)      // Reasonable number of modifications
-    ->Unit(benchmark::kMicrosecond)   // Use μs for modifications
-    ->Iterations(3)                  // Fixed number of iterations
+    ->Arg(THROUGHPUT_SIZE)           // 10,000 - Modify order latency (price/qty changes)
+    ->Unit(benchmark::kMicrosecond)  // Use μs for modifications
+    ->Iterations(10)                  // Fixed number of iterations
+    ->UseManualTime()                // Use manual timing to fix Windows timer issues
     ->ReportAggregatesOnly();
 
 // Use BENCHMARK_MAIN() which is simpler

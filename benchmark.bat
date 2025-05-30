@@ -61,7 +61,20 @@ if %ERRORLEVEL% NEQ 0 goto :menu
 
 echo [3/3] Running quick benchmarks...
 echo.
+
+rem Navigate to project root first, then to build directory
+cd /d %~dp0
 cd build\Release
+
+rem Check if executable exists
+if not exist "basic_benchmarks.exe" (
+    echo ❌ ERROR: basic_benchmarks.exe not found!
+    echo Available files:
+    dir *.exe
+    pause
+    goto :menu
+)
+
 basic_benchmarks.exe --benchmark_format=console --benchmark_repetitions=1
 echo.
 echo ✅ Quick benchmark complete!
@@ -256,10 +269,23 @@ exit /b 0
 
 :create_results_dir
 rem Create timestamped results directory
-set timestamp=%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%%time:~6,2%
-set timestamp=%timestamp: =0%
-set results_dir=benchmarks\results\%timestamp%
-mkdir "%results_dir%" 2>nul
+rem Generate timestamp in YYYYMMDD_HHMMSS format
+for /f "tokens=1-3 delims=/" %%a in ('date /t') do set "mydate=%%c%%a%%b"
+for /f "tokens=1-2 delims=:" %%a in ('time /t') do set "mytime=%%a%%b"
+set "mydate=%mydate: =%"
+set "mytime=%mytime: =%"
+set "timestamp=%mydate%_%mytime%"
+
+rem Set paths relative to project root
+cd /d %~dp0
+set "results_dir=benchmarks\results\%timestamp%"
+
+rem Ensure results directory structure exists
+if not exist "benchmarks" mkdir "benchmarks"
+if not exist "benchmarks\results" mkdir "benchmarks\results"
+if not exist "%results_dir%" mkdir "%results_dir%"
+
+echo Results will be saved to: %results_dir%
 exit /b 0
 
 :run_full_benchmarks
@@ -273,10 +299,38 @@ echo.
 echo ⏳ Estimated time: 3-5 minutes
 echo.
 
+rem Navigate to project root first, then to build directory
+cd /d %~dp0
 cd build\Release
-start /wait /normal basic_benchmarks.exe ^
+
+rem Check if executable exists
+if not exist "basic_benchmarks.exe" (
+    echo ❌ ERROR: basic_benchmarks.exe not found!
+    echo Available files:
+    dir *.exe
+    pause
+    exit /b 1
+)
+
+echo Running full benchmark suite...
+echo.
+
+rem Run benchmarks and show output in console
+basic_benchmarks.exe ^
     --benchmark_format=console ^
-    --benchmark_out="..\..\%results_dir%\benchmark_results.json" ^
+    --benchmark_repetitions=5 ^
+    --benchmark_report_aggregates_only=true
+
+echo.
+echo Benchmarks completed! Saving detailed results...
+
+rem Save JSON output - use full path from project root
+cd /d %~dp0
+set "full_results_path=%cd%\%results_dir%"
+cd build\Release
+
+basic_benchmarks.exe ^
+    --benchmark_out="%full_results_path%\benchmark_results.json" ^
     --benchmark_out_format=json ^
     --benchmark_repetitions=5 ^
     --benchmark_report_aggregates_only=true
@@ -301,10 +355,38 @@ echo.
 echo ⏳ Starting in 5 seconds... (Press Ctrl+C to cancel)
 timeout /t 5 >nul
 
+rem Navigate to project root first, then to build directory
+cd /d %~dp0
 cd build\Release
-start /wait /high basic_benchmarks.exe ^
+
+rem Check if executable exists
+if not exist "basic_benchmarks.exe" (
+    echo ❌ ERROR: basic_benchmarks.exe not found!
+    echo Available files:
+    dir *.exe
+    pause
+    exit /b 1
+)
+
+echo Running official baseline benchmarks...
+echo.
+
+rem Run benchmarks and show output in console, also save to file
+basic_benchmarks.exe ^
     --benchmark_format=console ^
-    --benchmark_out="..\..\%results_dir%\official_baseline.json" ^
+    --benchmark_repetitions=5 ^
+    --benchmark_report_aggregates_only=true
+
+echo.
+echo Benchmarks completed! Saving detailed results...
+
+rem Save JSON output - use full path from project root
+cd /d %~dp0
+set "full_results_path=%cd%\%results_dir%"
+cd build\Release
+
+basic_benchmarks.exe ^
+    --benchmark_out="%full_results_path%\official_baseline.json" ^
     --benchmark_out_format=json ^
     --benchmark_repetitions=5 ^
     --benchmark_report_aggregates_only=true
@@ -316,16 +398,22 @@ exit /b 0
 echo.
 echo [REPORT] Generating benchmark summary...
 
-echo ======================================== > "%results_dir%\README.md"
-echo ULTRABOOK TRADING ENGINE - BENCHMARK RESULTS >> "%results_dir%\README.md"
-echo ======================================== >> "%results_dir%\README.md"
-echo. >> "%results_dir%\README.md"
-echo Timestamp: %date% %time% >> "%results_dir%\README.md"
-echo CPU: %PROCESSOR_IDENTIFIER% >> "%results_dir%\README.md"
-echo Build: Release (-O3 -march=native) >> "%results_dir%\README.md"
-echo Mode: BENCHMARK_MODE (logging disabled) >> "%results_dir%\README.md"
-echo Iterations: 5 (aggregated) >> "%results_dir%\README.md"
-echo. >> "%results_dir%\README.md"
+rem Navigate back to project root for report generation
+cd /d %~dp0
+
+rem Create the summary report
+(
+echo ========================================
+echo ULTRABOOK TRADING ENGINE - BENCHMARK RESULTS
+echo ========================================
+echo.
+echo Timestamp: %date% %time%
+echo CPU: %PROCESSOR_IDENTIFIER%
+echo Build: Release ^(-O3 -march=native^)
+echo Mode: BENCHMARK_MODE ^(logging disabled^)
+echo Iterations: 5 ^(aggregated^)
+echo.
+) > "%results_dir%\README.md"
 
 echo ✅ BENCHMARK COMPLETED!
 echo.
@@ -340,26 +428,32 @@ exit /b 0
 echo.
 echo [REPORT] Generating official baseline report...
 
-echo ======================================== > "%results_dir%\OFFICIAL_BASELINE.md"
-echo ULTRABOOK TRADING ENGINE - OFFICIAL BASELINE >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo ======================================== >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo. >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo This benchmark complies with tmrw.md methodology >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo. >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo Timestamp: %date% %time% >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo System: %COMPUTERNAME% >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo CPU: %PROCESSOR_IDENTIFIER% >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo Power Plan: High Performance >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo CPU Parking: Disabled >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo Build: Release with maximum optimizations >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo BENCHMARK_MODE: Enabled (zero I/O overhead) >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo Priority: High >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo Iterations: 5 (aggregated results) >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo. >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo PERFORMANCE TARGETS: >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo - Order Processing: ^>1M orders/second >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo - Matching Latency: ^<500ns average >> "%results_dir%\OFFICIAL_BASELINE.md"
-echo - Order Book Updates: ^>5M updates/second >> "%results_dir%\OFFICIAL_BASELINE.md"
+rem Navigate back to project root for report generation
+cd /d %~dp0
+
+rem Create the official report
+(
+echo ========================================
+echo ULTRABOOK TRADING ENGINE - OFFICIAL BASELINE
+echo ========================================
+echo.
+echo This benchmark complies with tmrw.md methodology
+echo.
+echo Timestamp: %date% %time%
+echo System: %COMPUTERNAME%
+echo CPU: %PROCESSOR_IDENTIFIER%
+echo Power Plan: High Performance
+echo CPU Parking: Disabled
+echo Build: Release with maximum optimizations
+echo BENCHMARK_MODE: Enabled ^(zero I/O overhead^)
+echo Priority: High
+echo Iterations: 5 ^(aggregated results^)
+echo.
+echo PERFORMANCE TARGETS:
+echo - Order Processing: ^>1M orders/second
+echo - Matching Latency: ^<500ns average
+echo - Order Book Updates: ^>5M updates/second
+) > "%results_dir%\OFFICIAL_BASELINE.md"
 
 echo 🏆 OFFICIAL BASELINE COMPLETED!
 echo.
