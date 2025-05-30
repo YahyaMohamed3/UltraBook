@@ -44,7 +44,7 @@ This document captures the **official baseline benchmark** results for the **ULT
 
 ## Performance Graph
 
-![Baseline Comparison](output.png)
+![Baseline Comparison](benchmark.png)
 
 This graph visualizes the **mean vs median performance** across benchmarks, providing a quick view of current capabilities.
 
