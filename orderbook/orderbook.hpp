@@ -1,4 +1,4 @@
-//OrderBook class declaration 
+// OrderBook class declaration
 
 #ifndef ORDERBOOK_HPP
 #define ORDERBOOK_HPP
@@ -8,20 +8,19 @@
 #include <unordered_map>
 #include <optional>
 #include <mutex>
+#include <functional>
 #include "types.hpp"
 
 namespace ultraBook {
 
-
 class OrderBook {
 public:
-    enum class Side { BUY , SELL };
+    enum class Side { BUY, SELL };
 
     explicit OrderBook(Side side);
 
-
-    // Core operations
-    void addOrder(Order order);
+    // Core order operations
+    void addOrder(Order order); // Handles Limit, GTC, GTD, Iceberg
     bool cancelOrder(int orderId);
     std::optional<Order*> findOrder(int orderId);
     void modifyOrder(int orderId, const OrderModificationRequest& modRequest);
@@ -29,47 +28,44 @@ public:
     bool isEmpty() const;
     void clear();
 
-
-    // Stop Order management
+    // Stop order operations
     void addStopOrder(Order order);
     void checkAndTrigger(double lastPrice);
     void convertStopToMarket(Order* order);
     void convertStopToLimit(Order* order);
 
-    // Iceberg Order management 
+    // Iceberg order visibility
     void replenishIcebergOrder(Order* order);
 
-    // GTD Exiration
+    // GTD expiration
     void checkExpiredOrders();
 
-    // order Book state
-    void printOrderBook() const;
+    // Optional: remove expired stop orders if using expiry on them
+    void removeExpiredStopOrders();
 
+    // Diagnostics
+    void printOrderBook() const;
+    std::vector<Order> getAllOrders() const;
 
 private:
-Side side_;
+    Side side_;
+    mutable std::mutex bookMutex;
 
-mutable std::mutex bookMutex; // For thread saftey 
+    // Dynamic comparator for BUY (high-to-low) or SELL (low-to-high)
+    std::map<double, std::deque<Order>, std::function<bool(double, double)>> priceLevels;
 
+    // Stop order book (always low-to-high for consistency)
+    std::map<double, std::deque<Order>> stopOrders;
 
-// Price levels: key is price , vlaue is deque of orders (FIFO)
-std::map<double, std::deque<Order>, std::greater<>> priceLevels; // High-to-low for BUY, low-to-high for SELL
-std::map<double, std::deque<Order>> stopOrders; // Stop orders, key is stop price
+    // Fast lookup: orderId -> {price/stopPrice, iterator}
+    std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> orderIndex;
+    std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> stopIndex;
 
-
-// fast lookup for orders by ID (maps orderId  -> {price/stopPrice, iterator})
-std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> orderIndex;
-std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> stopIndex;
-
-
-void cleanPriceLevel(double price);
-void cleanStopLevel(double stopPrice);
-
+    // Cleanup helpers
+    void cleanPriceLevel(double price);
+    void cleanStopLevel(double stopPrice);
 };
 
+} // namespace ultraBook
 
-
-
-}// OrderBook class declaration
 #endif // ORDERBOOK_HPP
-
