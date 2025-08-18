@@ -1,5 +1,3 @@
-// OrderBook class declaration
-
 #ifndef ORDERBOOK_HPP
 #define ORDERBOOK_HPP
 
@@ -9,6 +7,8 @@
 #include <optional>
 #include <mutex>
 #include <functional>
+#include <vector>
+#include <chrono>
 #include "types.hpp"
 
 namespace ultraBook {
@@ -19,49 +19,57 @@ public:
 
     explicit OrderBook(Side side);
 
-    // Core order operations
-    void addOrder(Order order); // Handles Limit, GTC, GTD, Iceberg
+    // --- Core order operations ---
+    void addOrder(Order order);
     bool cancelOrder(int orderId);
-    std::optional<Order*> findOrder(int orderId);
+    std::optional<Order*> findOrder(int orderId) const;
     void modifyOrder(int orderId, const OrderModificationRequest& modRequest);
     std::optional<Order> getBestOrder() const;
     bool isEmpty() const;
     void clear();
 
-    // Stop order operations
+    // --- Stop order operations ---
     void addStopOrder(Order order);
     void checkAndTrigger(double lastPrice);
     void convertStopToMarket(Order* order);
     void convertStopToLimit(Order* order);
 
-    // Iceberg order visibility
+    // --- Iceberg order visibility ---
     void replenishIcebergOrder(Order* order);
 
-    // GTD expiration
+    // --- GTD expiration ---
     void checkExpiredOrders();
-
-    // Optional: remove expired stop orders if using expiry on them
     void removeExpiredStopOrders();
 
-    // Diagnostics
+    // --- Utility ---
     void printOrderBook() const;
     std::vector<Order> getAllOrders() const;
 
+    // Retrieve and clear triggered stop/stop-limit orders (for engine reprocessing) 
+    std::vector<Order> getAndClearTriggeredOrders();
+
 private:
-    Side side_;
+    // --- Internal data structures ---
+    using PriceLevel = std::deque<Order>;
+    using PriceMap = std::map<double, PriceLevel, std::function<bool(double, double)>>;
+
     mutable std::mutex bookMutex;
+    PriceMap priceLevels;
+    Side side_;
 
-    // Dynamic comparator for BUY (high-to-low) or SELL (low-to-high)
-    std::map<double, std::deque<Order>, std::function<bool(double, double)>> priceLevels;
+    // Maps orderId to (price, iterator in deque)
+    std::unordered_map<int, std::pair<double, PriceLevel::iterator>> orderIndex;
 
-    // Stop order book (always low-to-high for consistency)
+    // --- Stop orders ---
     std::map<double, std::deque<Order>> stopOrders;
-
-    // Fast lookup: orderId -> {price/stopPrice, iterator}
-    std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> orderIndex;
     std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> stopIndex;
 
-    // Cleanup helpers
+    // --- For triggered stop/stop-limit orders ---
+    std::vector<Order> triggeredOrders_;
+
+    std::function<bool(double, double)> comp_;
+
+    // --- Internal clean-up helpers ---
     void cleanPriceLevel(double price);
     void cleanStopLevel(double stopPrice);
 };

@@ -1,56 +1,63 @@
-//Engine class declaration
-
 #ifndef ENGINE_HPP
 #define ENGINE_HPP
 
-#include <map>
-#include <deque>
-#include <vector>
-#include <unordered_map>
+#include "../orderbook/orderbook.hpp"
 #include "types.hpp"
-#include<chrono>
-#include<chrono>
+#include <unordered_map>
+#include <vector>
+#include <chrono>
 
-namespace ultraBook{
-class MatchingEngine{
+namespace ultraBook {
+
+class MatchingEngine {
 public:
     MatchingEngine();
+
+    // 1) Order submission methods
     void addLimitOrder(int orderId, double price, int quantity, bool isBuy);
-    void addMarketOrder(int orderId, int quantity, bool isBuy, bool isConverted = false, Order* existingOrder = nullptr);
     void addGTCOrder(int orderId, double price, int quantity, bool isBuy);
-    void addGTDOrder(int orderId, double price, int quantity, bool isBuy, std::chrono::system_clock::time_point expiry);
+    void addGTDOrder(int orderId, double price, int quantity, bool isBuy,
+                     std::chrono::system_clock::time_point expiry);
+    void addIcebergOrder(int orderId, double price, int totalQty, int visibleQty,
+                         int replenishQty, bool isBuy);
     void addStopOrder(int orderId, double stopPrice, int quantity, bool isBuy);
-    void addStopLimitOrder(int orderId, double stopPrice, double limitPrice, int quantity, bool isBuy);
+    void addStopLimitOrder(int orderId, double stopPrice, double limitPrice,
+                           int quantity, bool isBuy);
+    void addMarketOrder(int orderId, int quantity, bool isBuy);
     void addIOCOrder(int orderId, double price, int quantity, bool isBuy);
     void addFOKOrder(int orderId, double price, int quantity, bool isBuy);
-    void addIcebergOrder(int orderId, double price, int quantity, int visibleQuantity, int replenishQuantity, bool isBuy);
-    void cancelOrder(int orderId);
-    void printOrderBook() const;
-    void printTradelog();
+
+    // process triggered stop/stop-limit orders
+
+    // 2) Core matching and maintenance
     void matchOrders();
-    void setOrderStatus(Order* order, OrderStatus newStatus);
+    void checkExpiredOrders();
+
+
+    // 3) Utility
+    void cancelOrder(int orderId);
+    void modifyOrder(int orderId, const OrderModificationRequest& req);
+
+    // 4) Introspection
     OrderStatus getOrderStatus(int orderId) const;
-    void convertStopToMarket(Order* order);
-    void checkandTrigger(double lastprice);
-    void replenishIcebergOrder(Order* order);
-    void convertStopToLimit(Order* order);
-    void checkExpiredOrders(); // New method to check expired GTD orders
-    void ModifyOrder(int OrderId , const OrderModificationRequest& modRequest);
+    void printOrderBook() const;
+    void printTradelog() const;
+
 
 private:
-    // Internal data structures for buy/sell order books
-    double lastPrice = 0.0;
-    std::map<double, std::deque<Order>, std::greater<>> buyOrders; // High-to-low
-    std::map<double, std::deque<Order>> sellOrders; // Low-to-high default
-    std::map<double, std::deque<Order>> buyStopOrders; // Buy Orders
-    std::map<double, std::deque<Order>> sellStopOrders; // Sell Orders
+    void refreshLastPriceFromBook();
+    void processTriggeredOrders(); // <-- Declaration only
 
-    // Order ID to order pointer (for fast lookup/cancel)
-    std::unordered_map<int, Order*> orderMap;
+    double lastPrice{0.0};
+    OrderBook buyBook{ OrderBook::Side::BUY };
+    OrderBook sellBook{ OrderBook::Side::SELL };
+
+    // keep a history of every order for status lookups & audit
+    std::unordered_map<int, Order> allOrdersMap;
     std::vector<Trade> tradeLog;
-    std::unordered_map<int , std::vector<Trade>> tradesByOrderId;
-    std::unordered_map<int, Order> allOrdersMap; 
+    std::unordered_map<int, std::vector<Trade>> tradesByOrderId;
 };
-}
+
+} // namespace ultraBook
+
 #endif // ENGINE_HPP
-// engine.hpp

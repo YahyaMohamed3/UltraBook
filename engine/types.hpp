@@ -265,6 +265,13 @@ struct OrderModificationRequest{
         return true;
     };
 };
+struct PriceComp {
+    bool reverse;
+    PriceComp(bool rev = false) : reverse(rev) {}
+    bool operator()(double a, double b) const {
+        return reverse ? a > b : a < b;
+    }
+};
 
 }// namespace ultraBook
 

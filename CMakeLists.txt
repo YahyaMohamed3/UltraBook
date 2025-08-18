@@ -27,6 +27,7 @@ endif()
 # Add engine library
 add_library(engine
     engine/engine.cpp
+    orderbook/orderbook.cpp 
 )
 
 # Add include directories
@@ -102,6 +103,18 @@ target_link_libraries(matching_engine_tests
 )
 include(GoogleTest)
 gtest_discover_tests(matching_engine_tests)
+
+# OrderBook unit tests
+add_executable(orderbook_tests
+  tests/orderbook/test_orderbook.cpp
+)
+target_link_libraries(orderbook_tests
+  PRIVATE
+    engine       # pull in OrderBook implementation
+    gtest_main
+)
+gtest_discover_tests(orderbook_tests)
+
 
 # Benchmark files
 if(NOT DEFINED BENCHMARK_FILE)

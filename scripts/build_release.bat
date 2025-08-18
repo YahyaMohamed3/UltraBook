@@ -1,6 +1,6 @@
 @echo off
 echo ===== Building FastChain Project (Release Mode) =====
-cd /d %~dp0
+cd /d "%~dp0\..
 
 rem Create build directory if it doesn't exist
 if not exist build mkdir build
