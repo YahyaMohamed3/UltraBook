@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <optional>
 #include <mutex>
+#include <shared_mutex>
 #include <functional>
 #include <vector>
 #include <chrono>
@@ -19,57 +20,63 @@ public:
 
     explicit OrderBook(Side side);
 
-    // --- Core order operations ---
+    // Core API (thread-safe)
     void addOrder(Order order);
     bool cancelOrder(int orderId);
-    std::optional<Order*> findOrder(int orderId) const;
+    std::optional<Order*> findOrder(int orderId);   // non-const: returns modifiable pointer
     void modifyOrder(int orderId, const OrderModificationRequest& modRequest);
-    std::optional<Order> getBestOrder() const;
+    std::optional<Order> getBestOrder() const;      // snapshot copy
     bool isEmpty() const;
     void clear();
 
-    // --- Stop order operations ---
+    // Stop orders
     void addStopOrder(Order order);
     void checkAndTrigger(double lastPrice);
-    void convertStopToMarket(Order* order);
-    void convertStopToLimit(Order* order);
 
-    // --- Iceberg order visibility ---
+    // Iceberg
     void replenishIcebergOrder(Order* order);
 
-    // --- GTD expiration ---
+    // GTD / housekeeping
     void checkExpiredOrders();
     void removeExpiredStopOrders();
 
-    // --- Utility ---
+    // Utilities
     void printOrderBook() const;
     std::vector<Order> getAllOrders() const;
-
-    // Retrieve and clear triggered stop/stop-limit orders (for engine reprocessing) 
     std::vector<Order> getAndClearTriggeredOrders();
 
 private:
-    // --- Internal data structures ---
-    using PriceLevel = std::deque<Order>;
-    using PriceMap = std::map<double, PriceLevel, std::function<bool(double, double)>>;
+    struct Level {
+        std::deque<Order> queue;
+        mutable std::mutex mtx;  // protects only this price level
+    };
 
-    mutable std::mutex bookMutex;
-    PriceMap priceLevels;
-    Side side_;
+    using PriceMap = std::map<double, Level, std::function<bool(double, double)>>;
 
-    // Maps orderId to (price, iterator in deque)
-    std::unordered_map<int, std::pair<double, PriceLevel::iterator>> orderIndex;
+    // Price tree: shared for lookup, unique for insert/erase
+    mutable std::shared_mutex treeMutex;
+    PriceMap                  priceLevels;
+    Side                      side_;
+    std::function<bool(double, double)> comp_;  // comparator (BUY: desc, SELL: asc)
 
-    // --- Stop orders ---
-    std::map<double, std::deque<Order>> stopOrders;
-    std::unordered_map<int, std::pair<double, std::deque<Order>::iterator>> stopIndex;
+    // Order index: orderId -> price. Find within level under level lock.
+    std::unordered_map<int, double> orderPriceIndex;
+    mutable std::shared_mutex       orderIndexMutex;
 
-    // --- For triggered stop/stop-limit orders ---
-    std::vector<Order> triggeredOrders_;
+    // Stop orders follow the same structure
+    struct StopLevel {
+        std::deque<Order> queue;
+        mutable std::mutex mtx;
+    };
 
-    std::function<bool(double, double)> comp_;
+    mutable std::shared_mutex       stopTreeMutex;
+    std::map<double, StopLevel>     stopOrders;     // keyed by stop price (ascending)
+    std::unordered_map<int, double> stopPriceIndex; // orderId -> stop price
+    mutable std::shared_mutex       stopIndexMutex;
 
-    // --- Internal clean-up helpers ---
+    std::vector<Order> triggeredOrders_;            // hand-off buffer
+
+    // Helpers (call without holding level locks)
     void cleanPriceLevel(double price);
     void cleanStopLevel(double stopPrice);
 };

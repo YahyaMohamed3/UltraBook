@@ -46,7 +46,7 @@ public:
 
 private:
     void refreshLastPriceFromBook();
-    void processTriggeredOrders(); // <-- Declaration only
+    void processTriggeredOrders(); 
 
     double lastPrice{0.0};
     OrderBook buyBook{ OrderBook::Side::BUY };

@@ -116,6 +116,18 @@ target_link_libraries(orderbook_tests
 gtest_discover_tests(orderbook_tests)
 
 
+# Advanced OrderBook concurrency tests
+add_executable(orderbook_concurrency_tests
+  tests/orderbook/test_orderbook_concurrency.cpp
+)
+target_link_libraries(orderbook_concurrency_tests
+  PRIVATE
+    engine
+    gtest_main
+)
+gtest_discover_tests(orderbook_concurrency_tests)
+
+
 # Benchmark files
 if(NOT DEFINED BENCHMARK_FILE)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/benchmark_matching_engine.cpp")
