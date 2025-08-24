@@ -1,5 +1,4 @@
-// tests/orderbook/test_orderbook_concurrency.cpp
-// Build with C++17. (No C++20 features used.)
+// Build with C++17.
 
 #include <gtest/gtest.h>
 
@@ -44,20 +43,17 @@ protected:
     OrderBook buyBook{OrderBook::Side::BUY};
     OrderBook sellBook{OrderBook::Side::SELL};
 
-    // Helper: find an order by id from a snapshot, returns (found, price_if_any)
     static std::pair<bool, std::optional<double>>
     findInSnapshot(const std::vector<Order>& snap, int id) {
-        for (const auto& o : snap) {
-            if (o.orderId == id) return {true, o.price};
-        }
+        for (const auto& o : snap) if (o.orderId == id) return {true, o.price};
         return {false, std::optional<double>{}};
     }
 };
 
 // 1) Parallel adds to disjoint price levels (minimal contention)
 TEST_F(OrderBookConcurrencyTest, ParallelAdds_DifferentLevels) {
-    constexpr int T = 8;     // threads
-    constexpr int N = 1000;  // per thread
+    constexpr int T = 8;
+    constexpr int N = 1000;
     Cpp17Barrier start(T);
 
     std::vector<std::thread> th;
@@ -76,21 +72,16 @@ TEST_F(OrderBookConcurrencyTest, ParallelAdds_DifferentLevels) {
     for (auto& x : th) x.join();
 
     const auto all = buyBook.getAllOrders();
-    // All inserted?
     ASSERT_EQ(all.size(), static_cast<size_t>(T * N));
 
-    // Each level has exactly N orders
     std::unordered_map<double, int> counts;
     counts.reserve(T);
     for (const auto& o : all) {
         ASSERT_TRUE(o.price.has_value());
         counts[*o.price] += 1;
     }
-
     ASSERT_EQ(counts.size(), static_cast<size_t>(T));
-    for (const auto& kv : counts) {
-        EXPECT_EQ(kv.second, N);
-    }
+    for (const auto& kv : counts) EXPECT_EQ(kv.second, N);
 }
 
 // 2) Parallel adds to the SAME price level (tests per-level locking)
@@ -115,7 +106,6 @@ TEST_F(OrderBookConcurrencyTest, ParallelAdds_SameLevel) {
     for (auto& x : th) x.join();
 
     const auto all = sellBook.getAllOrders();
-    // Only one level; no duplicates; exact cardinality
     ASSERT_EQ(all.size(), static_cast<size_t>(T * N));
 
     std::unordered_set<int> ids;
@@ -130,19 +120,14 @@ TEST_F(OrderBookConcurrencyTest, ParallelAdds_SameLevel) {
 
 // 3) Readers hammer find/getBest while a writer modifies a hot order’s price (no deadlocks)
 TEST_F(OrderBookConcurrencyTest, ReadersVsWriter_ModifyHotOrder) {
-    // Seed book with a ladder
-    for (int i = 0; i < 1000; ++i) {
+    for (int i = 0; i < 1000; ++i)
         buyBook.addOrder({i + 1, 100.0 + (i % 10), 1, true, OrderType::LIMIT});
-    }
 
-    // Ensure hot order exists (id 777 may or may not be present from seeding)
     const int hotId = 777;
     {
         auto snap = buyBook.getAllOrders();
         auto [found, _] = findInSnapshot(snap, hotId);
-        if (!found) {
-            buyBook.addOrder({hotId, 110.0, 1, true, OrderType::LIMIT});
-        }
+        if (!found) buyBook.addOrder({hotId, 110.0, 1, true, OrderType::LIMIT});
     }
 
     std::atomic<bool> run{true};
@@ -150,9 +135,8 @@ TEST_F(OrderBookConcurrencyTest, ReadersVsWriter_ModifyHotOrder) {
         OrderModificationRequest r1, r2;
         r1.newPrice = 150.0;
         r2.newPrice = 110.0;
-        for (int k = 0; k < 50'000; ++k) {
+        for (int k = 0; k < 50'000; ++k)
             buyBook.modifyOrder(hotId, (k & 1) ? r1 : r2);
-        }
         run.store(false, std::memory_order_release);
     });
 
@@ -162,9 +146,8 @@ TEST_F(OrderBookConcurrencyTest, ReadersVsWriter_ModifyHotOrder) {
     for (int r = 0; r < R; ++r) {
         readers.emplace_back([&]{
             while (run.load(std::memory_order_acquire)) {
-                // These calls must be safe under concurrent modify
                 (void)buyBook.findOrder(hotId);
-                (void)buyBook.getBestOrder();
+                (void)buyBook.getBestOrder(); // best cache path
             }
         });
     }
@@ -172,8 +155,6 @@ TEST_F(OrderBookConcurrencyTest, ReadersVsWriter_ModifyHotOrder) {
     writer.join();
     for (auto& t : readers) t.join();
 
-    // After writer stops, hot order must exist at one of the target prices.
-    // Use a snapshot to avoid guessing the return type of findOrder.
     const auto snap = buyBook.getAllOrders();
     auto [found, px] = findInSnapshot(snap, hotId);
     ASSERT_TRUE(found);
@@ -189,7 +170,6 @@ TEST_F(OrderBookConcurrencyTest, ConcurrentCancelAfterBulkInsert) {
         buyBook.addOrder({100'000 + i, p, 1, true, OrderType::LIMIT});
     }
 
-    // Cancel all even IDs in parallel, striped by thread index
     constexpr int T = 6;
     std::vector<std::thread> th;
     th.reserve(T);
@@ -198,16 +178,79 @@ TEST_F(OrderBookConcurrencyTest, ConcurrentCancelAfterBulkInsert) {
         th.emplace_back([&, t]{
             for (int i = t; i < TOTAL; i += T) {
                 const int id = 100'000 + i;
-                if ((id % 2) == 0) {
-                    buyBook.cancelOrder(id);
-                }
+                if ((id % 2) == 0) buyBook.cancelOrder(id);
             }
         });
     }
     for (auto& x : th) x.join();
 
     const auto all = buyBook.getAllOrders();
-    for (const auto& o : all) {
-        EXPECT_EQ(o.orderId % 2, 1) << "Even id remained: " << o.orderId;
+    for (const auto& o : all) EXPECT_EQ(o.orderId % 2, 1) << "Even id remained: " << o.orderId;
+}
+
+/* NEW: cache/id-map stress & invariants */
+
+// 5) Readers see consistent best while head level churns (cache never dangles)
+TEST_F(OrderBookConcurrencyTest, ReadersSeeConsistentBest) {
+    // Seed two levels; 101.0 will be best on BUY
+    buyBook.addOrder({1, 100.0, 1, true, OrderType::LIMIT});
+    buyBook.addOrder({2, 101.0, 1, true, OrderType::LIMIT});
+
+    std::atomic<bool> run{true};
+    std::thread reader([&]{
+        while (run.load(std::memory_order_acquire)) {
+            auto b = buyBook.getBestOrder();
+            if (b) { ASSERT_GT(b->quantity, 0); }
+        }
+    });
+
+    // Writer repeatedly toggles who is best & empties head
+    for (int k = 0; k < 5000; ++k) {
+        buyBook.addOrder({10'000 + k, 102.0, 1, true, OrderType::LIMIT}); // superior
+        auto best = buyBook.getBestOrder();
+        ASSERT_TRUE(best.has_value());
+        buyBook.cancelOrder(best->orderId); // erase head; cache must recompute
+    }
+
+    run.store(false, std::memory_order_release);
+    reader.join();
+}
+
+// 6) Id-map stress: many modify/cancel across disjoint levels
+TEST_F(OrderBookConcurrencyTest, IdMapStress_ModifyCancel) {
+    constexpr int N = 3000;
+    for (int i = 0; i < N; ++i) {
+        double px = 50.0 + (i % 50);
+        buyBook.addOrder({200'000 + i, px, 2, true, OrderType::LIMIT});
+    }
+
+    std::atomic<bool> run{true};
+    std::thread mods([&]{
+        for (int i = 0; i < N; ++i) {
+            OrderModificationRequest r;
+            if ((i % 3) == 0) r.newPrice = 60.0 + (i % 50); // move across levels
+            if ((i % 5) == 0) r.newQuantity = 1;            // decrease qty (no requeue)
+            buyBook.modifyOrder(200'000 + i, r);
+        }
+        run.store(false, std::memory_order_release);
+    });
+
+    std::thread cancels([&]{
+        int i = 0;
+        while (run.load(std::memory_order_acquire) && i < N) {
+            if ((i % 7) == 0) buyBook.cancelOrder(200'000 + i);
+            ++i;
+        }
+    });
+
+    mods.join();
+    cancels.join();
+
+    // Ensure no phantom entries remained (light sanity)
+    for (int i = 0; i < N; ++i) {
+        auto optPtr = buyBook.findOrder(200'000 + i); // std::optional<Order*>
+        if (optPtr.has_value()) {
+            EXPECT_NE(optPtr.value(), nullptr);
+        }
     }
 }

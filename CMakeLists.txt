@@ -92,6 +92,7 @@ message(STATUS "Google Benchmark configured with FORCED RELEASE mode")
 
 enable_testing()
 
+# ---------------- Unit Tests ----------------
 add_executable(matching_engine_tests 
     tests/engine/test_matching_engine.cpp
 )
@@ -110,11 +111,10 @@ add_executable(orderbook_tests
 )
 target_link_libraries(orderbook_tests
   PRIVATE
-    engine       # pull in OrderBook implementation
+    engine
     gtest_main
 )
 gtest_discover_tests(orderbook_tests)
-
 
 # Advanced OrderBook concurrency tests
 add_executable(orderbook_concurrency_tests
@@ -127,8 +127,7 @@ target_link_libraries(orderbook_concurrency_tests
 )
 gtest_discover_tests(orderbook_concurrency_tests)
 
-
-# Benchmark files
+# ---------------- Benchmarks ----------------
 if(NOT DEFINED BENCHMARK_FILE)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/benchmark_matching_engine.cpp")
         set(BENCHMARK_FILE "${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/engine/benchmark_matching_engine.cpp")
@@ -145,49 +144,44 @@ add_executable(basic_benchmarks
     benchmarks/engine/basic_benchmarks.cpp
 )
 
-target_link_libraries(matching_engine_benchmarks
-    PRIVATE
-    engine
-    benchmark::benchmark
+# --- Stress benchmarks (multi-threaded, p50/p90/p99) ---
+add_executable(stress_benchmarks
+    benchmarks/engine/stress_benchmarks.cpp
 )
-target_link_libraries(basic_benchmarks
-    PRIVATE
-    engine
-    benchmark::benchmark
-)
+
+# Link libraries
+target_link_libraries(matching_engine_benchmarks PRIVATE engine benchmark::benchmark)
+target_link_libraries(basic_benchmarks PRIVATE engine benchmark::benchmark)
+target_link_libraries(stress_benchmarks PRIVATE engine benchmark::benchmark)
+
+# Stress benchmarks require C++20 for std::barrier
+target_compile_features(stress_benchmarks PRIVATE cxx_std_20)
 
 # Also link winmm to benchmark executables (in case timeBeginPeriod is used there too)
 if(WIN32)
   target_link_libraries(matching_engine_benchmarks PRIVATE winmm)
   target_link_libraries(basic_benchmarks PRIVATE winmm)
+  target_link_libraries(stress_benchmarks PRIVATE winmm)
 endif()
 
+# Extra optimization flags for benchmarks
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(matching_engine_benchmarks PRIVATE 
-    -ffast-math
-    -funroll-loops
-  )
-  target_compile_options(basic_benchmarks PRIVATE 
-    -ffast-math
-    -funroll-loops
-  )
+  target_compile_options(matching_engine_benchmarks PRIVATE -ffast-math -funroll-loops)
+  target_compile_options(basic_benchmarks PRIVATE -ffast-math -funroll-loops)
+  target_compile_options(stress_benchmarks PRIVATE -ffast-math -funroll-loops)
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-  target_compile_options(matching_engine_benchmarks PRIVATE 
-    /fp:fast
-    /Qpar
-    /Qfast_transcendentals
-  )
-  target_compile_options(basic_benchmarks PRIVATE 
-    /fp:fast
-    /Qpar
-    /Qfast_transcendentals
-  )
+  target_compile_options(matching_engine_benchmarks PRIVATE /fp:fast /Qpar /Qfast_transcendentals)
+  target_compile_options(basic_benchmarks PRIVATE /fp:fast /Qpar /Qfast_transcendentals)
+  target_compile_options(stress_benchmarks PRIVATE /fp:fast /Qpar /Qfast_transcendentals)
 endif()
 
+# Compile definitions
 target_compile_definitions(matching_engine_benchmarks PRIVATE BENCHMARK_MODE)
 target_compile_definitions(basic_benchmarks PRIVATE BENCHMARK_MODE)
+target_compile_definitions(stress_benchmarks PRIVATE BENCHMARK_MODE)
 target_compile_definitions(matching_engine_tests PRIVATE DEBUG_MODE)
 
+# Custom targets to run
 add_custom_target(run_benchmarks
     COMMAND $<TARGET_FILE:matching_engine_benchmarks>
     DEPENDS matching_engine_benchmarks
@@ -199,6 +193,12 @@ add_custom_target(run_basic_benchmarks
     DEPENDS basic_benchmarks
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Running basic performance benchmarks..."
+)
+add_custom_target(run_stress_benchmarks
+    COMMAND $<TARGET_FILE:stress_benchmarks> --benchmark_counters_tabular=true
+    DEPENDS stress_benchmarks
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Running stress benchmarks..."
 )
 
 message(STATUS "Release flags: ${CMAKE_CXX_FLAGS_RELEASE}")

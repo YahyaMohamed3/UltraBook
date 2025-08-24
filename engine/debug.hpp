@@ -4,20 +4,20 @@
 #include <iostream>
 #include <iomanip>
 
-// Define BENCHMARK_MODE to disable all output during benchmarking
-// This significantly improves benchmark performance by eliminating I/O overhead
-#ifdef BENCHMARK_MODE
-    // In benchmark mode, all logging macros are no-ops (compile to nothing)
-    #define ENGINE_LOG(x) do {} while(0)
-    #define ENGINE_DEBUG(x) do {} while(0)
-    #define ENGINE_ERROR(x) do {} while(0)
-    #define ENGINE_PRINT(x) do {} while(0)
+// Logging is OFF by default. It is enabled only when DEBUG_MODE is defined.
+// This avoids any I/O in benchmarks and Release builds, even if the engine
+// is compiled as a separate library without BENCHMARK_MODE visible.
+
+#ifdef DEBUG_MODE
+  #define ENGINE_LOG(x)   do { std::cout << x << std::endl; } while(0)
+  #define ENGINE_DEBUG(x) do { std::cout << "[DEBUG] " << x << std::endl; } while(0)
+  #define ENGINE_ERROR(x) do { std::cerr << "[ERROR] " << x << std::endl; } while(0)
+  #define ENGINE_PRINT(x) do { std::cout << x << std::endl; } while(0)
 #else
-    // In normal mode, logging macros work as expected
-    #define ENGINE_LOG(x) std::cout << x << std::endl
-    #define ENGINE_DEBUG(x) std::cout << "[DEBUG] " << x << std::endl
-    #define ENGINE_ERROR(x) std::cerr << "[ERROR] " << x << std::endl
-    #define ENGINE_PRINT(x) std::cout << x << std::endl
+  #define ENGINE_LOG(x)   do {} while(0)
+  #define ENGINE_DEBUG(x) do {} while(0)
+  #define ENGINE_ERROR(x) do {} while(0)
+  #define ENGINE_PRINT(x) do {} while(0)
 #endif
 
 #endif // DEBUG_HPP

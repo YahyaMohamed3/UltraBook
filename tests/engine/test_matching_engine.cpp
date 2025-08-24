@@ -239,6 +239,60 @@ TEST_F(MatchingEngineTest, ModifyPriceTimePriorityAndMatch) {
     EXPECT_EQ(engine.getOrderStatus(111), OrderStatus::FILLED);
 }
 
+TEST_F(MatchingEngineTest, MarketConsumesMultipleRestingOrdersInOneSweep) {
+    // Two small resting sells at same price; one market buy should eat both.
+    engine.addLimitOrder(300, 100.0, 2, /*isBuy=*/false);
+    engine.addLimitOrder(301, 100.0, 3, /*isBuy=*/false);
+    engine.addMarketOrder(302, /*qty=*/5, /*isBuy=*/true);
+
+    EXPECT_EQ(engine.getOrderStatus(302), OrderStatus::FILLED);
+    EXPECT_EQ(engine.getOrderStatus(300), OrderStatus::FILLED);
+    EXPECT_EQ(engine.getOrderStatus(301), OrderStatus::FILLED);
+}
+
+TEST_F(MatchingEngineTest, IOCRespectsLimitBoundaryWithoutResting) {
+    // Price gate blocks execution beyond limit; partial fills allowed, remainder cancels.
+    engine.addLimitOrder(310,  99.0, 2, /*isBuy=*/false); // matchable @<=100
+    engine.addLimitOrder(311, 101.0, 2, /*isBuy=*/false); // NOT matchable for buy limit 100
+
+    engine.addIOCOrder(312, /*price=*/100.0, /*qty=*/4, /*isBuy=*/true);
+    // Only the 2@99 can fill; the 2@101 are beyond limit and must not be touched
+    EXPECT_EQ(engine.getOrderStatus(312), OrderStatus::PARTIALLY_FILLED);
+    EXPECT_EQ(engine.getOrderStatus(310), OrderStatus::FILLED);
+    EXPECT_EQ(engine.getOrderStatus(311), OrderStatus::ACTIVE); // untouched
+}
+// SELL stop triggers on price drop (ref price <= stop) and FILLS with available bid
+TEST_F(MatchingEngineTest, SellStopTriggersAndFillsWhenLiquidity) {
+    // Post a bid and an ask so the engine's reference price is mid = 100
+    engine.addLimitOrder(6001, /*price=*/99.0, /*qty=*/5, /*isBuy=*/true);   // best bid
+    engine.addLimitOrder(6002, /*price=*/101.0,/*qty=*/5, /*isBuy=*/false);  // best ask
+
+    // A SELL stop at 100 should trigger (ref 100 <= stop 100) and become MARKET SELL,
+    // which then executes against the 99 bid.
+    engine.addStopOrder(6000, /*stopPrice=*/100.0, /*qty=*/5, /*isBuy=*/false);
+    engine.matchOrders();
+
+    EXPECT_EQ(engine.getOrderStatus(6000), OrderStatus::FILLED);
+    EXPECT_TRUE(engine.getOrderStatus(6001) == OrderStatus::FILLED
+             || engine.getOrderStatus(6001) == OrderStatus::PARTIALLY_FILLED);
+}
+
+// FOK must cancel if available depth exists only BEYOND the price gate
+TEST_F(MatchingEngineTest, FOKCancelsIfLiquidityOnlyBeyondLimit) {
+    // Place liquidity but only at 101 — beyond a buy limit of 100
+    engine.addLimitOrder(6101, 101.0, 1, /*isBuy=*/false);
+    engine.addLimitOrder(6102, 101.0, 1, /*isBuy=*/false);
+
+    engine.addFOKOrder(6100, /*price=*/100.0, /*qty=*/2, /*isBuy=*/true);
+    EXPECT_EQ(engine.getOrderStatus(6100), OrderStatus::CANCELED);
+
+    // Liquidity that was beyond the gate remains untouched
+    EXPECT_EQ(engine.getOrderStatus(6101), OrderStatus::ACTIVE);
+    EXPECT_EQ(engine.getOrderStatus(6102), OrderStatus::ACTIVE);
+}
+
+
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

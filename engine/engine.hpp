@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 #include <chrono>
+#include <optional>
 
 namespace ultraBook {
 
@@ -23,16 +24,15 @@ public:
     void addStopOrder(int orderId, double stopPrice, int quantity, bool isBuy);
     void addStopLimitOrder(int orderId, double stopPrice, double limitPrice,
                            int quantity, bool isBuy);
+
+    // Fast paths (do not rest the taker)
     void addMarketOrder(int orderId, int quantity, bool isBuy);
     void addIOCOrder(int orderId, double price, int quantity, bool isBuy);
     void addFOKOrder(int orderId, double price, int quantity, bool isBuy);
 
-    // process triggered stop/stop-limit orders
-
     // 2) Core matching and maintenance
     void matchOrders();
     void checkExpiredOrders();
-
 
     // 3) Utility
     void cancelOrder(int orderId);
@@ -43,16 +43,20 @@ public:
     void printOrderBook() const;
     void printTradelog() const;
 
-
 private:
     void refreshLastPriceFromBook();
-    void processTriggeredOrders(); 
+    void processTriggeredOrders();
+
+    // Internal: sweep opposite book up to 'remaining'; optional limit price.
+    // Returns filled quantity.
+    int sweepOpposite(int takerId, int remaining, bool isBuy,
+                      std::optional<double> limitPrice);
 
     double lastPrice{0.0};
     OrderBook buyBook{ OrderBook::Side::BUY };
     OrderBook sellBook{ OrderBook::Side::SELL };
 
-    // keep a history of every order for status lookups & audit
+    // keep a history of every order for status & audit
     std::unordered_map<int, Order> allOrdersMap;
     std::vector<Trade> tradeLog;
     std::unordered_map<int, std::vector<Trade>> tradesByOrderId;

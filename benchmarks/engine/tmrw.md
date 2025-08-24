@@ -1,10 +1,10 @@
-# 🧪 ULTRABOOK Benchmarking Baseline (May 17, 2025)
+#  ULTRABOOK Benchmarking Baseline (May 17, 2025)
 
 This document defines the official baseline benchmarks for ULTRABOOK's order matching engine. All future optimizations, profiling, and performance improvements will be compared against this snapshot.
 
 ---
 
-## ✅ Goals
+##  Goals
 
 - Establish a reliable performance baseline across key operations.
 - Use this data to validate optimizations and catch regressions.
@@ -12,7 +12,7 @@ This document defines the official baseline benchmarks for ULTRABOOK's order mat
 
 ---
 
-## 🗂️ Benchmarks Included
+##  Benchmarks Included
 
 | Benchmark                     | Input Size | Purpose                                   |
 |------------------------------|------------|-------------------------------------------|
@@ -26,7 +26,7 @@ This document defines the official baseline benchmarks for ULTRABOOK's order mat
 
 ---
 
-## ⚙️ Benchmarking Strategy
+##  Benchmarking Strategy
 
 ### 0. **Windows Setup Script**
 
@@ -50,11 +50,11 @@ This script will:
 
 Before running benchmarks:
 
-- ✅ Close all background apps (e.g., browsers, IDEs, Discord, Spotify).
-- ✅ Plug in power and enable **Performance Mode** in OS settings.
-- ✅ (Optional) Disable CPU throttling (via BIOS or `cpupower frequency-set`).
-- ✅ (Optional) Isolate a core (e.g., `taskset` on Linux).
-- ✅ (Optional) Prioritize task:
+-  Close all background apps (e.g., browsers, IDEs, Discord, Spotify).
+-  Plug in power and enable **Performance Mode** in OS settings.
+-  (Optional) Disable CPU throttling (via BIOS or `cpupower frequency-set`).
+-  (Optional) Isolate a core (e.g., `taskset` on Linux).
+-  (Optional) Prioritize task:
   
 ```bash
 nice -n -20 ./basic_benchmarks.exe --benchmark_repetitions=10 ...
@@ -88,7 +88,7 @@ BENCHMARK(BM_OrderModification)->Arg(10000);
 
 ---
 
-## 📦 Benchmark Output
+##  Benchmark Output
 
 Run the benchmark and save results with:
 
@@ -101,7 +101,7 @@ Run the benchmark and save results with:
 
 ---
 
-## 🗃️ Save Metadata With the Result
+##  Save Metadata With the Result
 
 Create a `README.txt` or `README.md` alongside the JSON output, containing:
 
@@ -127,19 +127,19 @@ in a permanent folder such as:
 
 ---
 
-## 🧼 Tomorrow's Finalization Checklist
+##  Tomorrow's Finalization Checklist
 
-* [ ] ✅ Clean build: `Release` mode (`-O3`, `-march=native`)
-* [ ] ✅ Run full benchmark suite with proper inputs
-* [ ] ✅ Add `BM_OrderModification/10000` to suite
-* [ ] ✅ Save output to `baseline_2025_05_17.json`
-* [ ] ✅ Write `README.md` with full metadata
-* [ ] ✅ Store all in `/benchmarks/baselines/`
-* [ ] ✅ Run each test twice to check for stability
+* [ ]  Clean build: `Release` mode (`-O3`, `-march=native`)
+* [ ]  Run full benchmark suite with proper inputs
+* [ ]  Add `BM_OrderModification/10000` to suite
+* [ ]  Save output to `baseline_2025_05_17.json`
+* [ ]  Write `README.md` with full metadata
+* [ ]  Store all in `/benchmarks/baselines/`
+* [ ]  Run each test twice to check for stability
 
 ---
 
-## 📈 Output Expectations
+##  Output Expectations
 
 Your JSON will include:
 
@@ -147,7 +147,3 @@ Your JSON will include:
 * `items_per_second` (for throughput): **processed ops/sec**
 
 Use median or average for reporting. Validate deviations are within <5% between runs.
-
----
-
-You now have a complete, reproducible, and industry-grade benchmark baseline for ULTRABOOK.
