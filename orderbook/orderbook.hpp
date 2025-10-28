@@ -5,7 +5,7 @@
 #include <memory>
 #include <memory_resource>
 #include <map>
-#include <deque>
+#include <list> // <--- Changed from <deque>
 #include <unordered_map>
 #include <optional>
 #include <mutex>
@@ -36,6 +36,7 @@ public:
     void addStopOrder(Order order);
     void checkAndTrigger(double lastPrice);           // collect triggered to a buffer
     std::vector<Order> getAndClearTriggeredOrders();  // drain triggered buffer
+    bool cancelStopOrder(int orderId); // <-- Added helper for O(1) stop cancel
 
     // ---------- Iceberg ----------
     void replenishIcebergOrder(Order* order);
@@ -50,21 +51,25 @@ public:
 
 private:
     // -------- Internal structures (PMR-aware) --------
+    
+    // Using std::pmr::list for O(1) erase
+    using OrderQueue = std::pmr::list<Order>;
+    
     struct Level {
         explicit Level(double px, std::pmr::memory_resource* mr)
-        : price(px), queue(std::pmr::deque<Order>(mr)) {}
+        : price(px), queue(OrderQueue(mr)) {} // <-- Use list
 
         double price;
-        std::pmr::deque<Order> queue; // FIFO by arrival
+        OrderQueue queue;             // <-- Use list
         mutable std::mutex mtx;       // protects only this level's queue
     };
 
     struct StopLevel {
         explicit StopLevel(double sp, std::pmr::memory_resource* mr)
-        : stop(sp), queue(std::pmr::deque<Order>(mr)) {}
+        : stop(sp), queue(OrderQueue(mr)) {} // <-- Use list
 
         double stop;
-        std::pmr::deque<Order> queue;
+        OrderQueue queue;             // <-- Use list
         mutable std::mutex mtx;
     };
 
@@ -82,8 +87,8 @@ private:
     void maybe_update_best_add_(const std::shared_ptr<Level>& lvl);   // tree write lock held
     void recompute_best_();                                           // tree write lock held
 
-    // Locate via id index (fast path), returns level + index if present
-    struct Location { std::shared_ptr<Level> lvl; std::size_t idx; };
+    // Locate via id index (fast path), returns level + iterator
+    struct Location { std::shared_ptr<Level> lvl; OrderQueue::iterator it; }; // <-- Use iterator
     std::optional<Location> locate_(int orderId) const;
 
     // Clean empty nodes (call without holding level lock)
@@ -95,17 +100,13 @@ private:
     Side side_;
 
     // -------- PMR arenas --------
-    mutable std::pmr::monotonic_buffer_resource arena_{ 2 * 1024 * 1024 };      // containers
-    mutable std::pmr::monotonic_buffer_resource node_arena_{ 2 * 1024 * 1024 }; // nodes
+    mutable std::pmr::monotonic_buffer_resource arena_{ 2 * 1024 * 1024 };
+    mutable std::pmr::synchronized_pool_resource node_arena_{ std::pmr::new_delete_resource() };
 
     // -------- Price trees --------
-    BuyTree*  buy_tree_  = nullptr;
+    BuyTree* buy_tree_  = nullptr;
     SellTree* sell_tree_ = nullptr;
-
-    // Tree lock (protects structure & level existence)
-    mutable std::shared_mutex treeMutex_;
-
-    // Best-of-book cache: store a shared_ptr and use atomic_load/store free functions (MSVC-safe)
+    mutable std::shared_mutex treeMutex_; 
     mutable std::shared_ptr<Level> bestLevel_;
 
     // -------- Stop trees --------
@@ -113,16 +114,18 @@ private:
     mutable std::shared_mutex stopTreeMutex_;
 
     // -------- Global id → location index (for priced orders) --------
-    struct IdIndex { std::weak_ptr<Level> lvl; std::size_t idx = 0; };
+    // Stores iterator for O(1) lookup/erase
+    struct IdIndex { std::weak_ptr<Level> lvl; OrderQueue::iterator it; }; // <-- Use iterator
     mutable std::pmr::unordered_map<int, IdIndex> id_map_{ &arena_ };
     mutable std::shared_mutex id_mtx_; // protects id_map_
 
-    // For stop orders: orderId -> stop price (for quick membership)
-    std::pmr::unordered_map<int, double> stop_index_{ &arena_ };
+    // For stop orders: orderId -> location (for O(1) cancel/modify)
+    struct StopIdIndex { std::weak_ptr<StopLevel> lvl; OrderQueue::iterator it; }; // <-- New struct
+    std::pmr::unordered_map<int, StopIdIndex> stop_index_{ &arena_ }; // <-- Changed type
     mutable std::shared_mutex stopIndexMutex_;
 
     // Triggered buffer for handoff to engine
-    std::vector<Order> triggeredOrders_; // small, transient
+    std::vector<Order> triggeredOrders_; 
 
     // Utility
     bool is_buy_() const noexcept { return side_ == Side::BUY; }

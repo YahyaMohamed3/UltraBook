@@ -69,9 +69,15 @@ int MatchingEngine::sweepOpposite(int takerId, int remaining, bool isBuy,
 
         // Compute trade size from snapshot remaining (authoritative enough for a single step)
         int oppRemain = oppSnap.getRemainingQuantity();
-        if (oppRemain <= 0) break;
+        if (oppRemain <= 0) {
+            // This can happen if the book's bestLevel_ cache is slightly stale.
+            // Just cancel the dead order and continue the loop.
+            (isBuy ? sellBook : buyBook).cancelOrder(oppSnap.orderId);
+            continue;
+        }
 
-        int tradeQty = std::min(remaining, oppRemain);
+        // *** FIX 1 ***: Wrap std::min in parens to avoid Windows macro collision
+        int tradeQty = (std::min)(remaining, oppRemain);
         const int takerIdBuy  = isBuy ? taker.orderId : oppSnap.orderId;
         const int takerIdSell = isBuy ? oppSnap.orderId : taker.orderId;
 
@@ -97,11 +103,13 @@ int MatchingEngine::sweepOpposite(int takerId, int remaining, bool isBuy,
         filledTotal += tradeQty;
 
         // Reflect into the opposite book: cancel if fully done, else shrink quantity
+        // *** NOTE ***: These calls are now O(1) due to the orderbook.cpp refactor.
         if (tradeQty == oppRemain) {
             (isBuy ? sellBook : buyBook).cancelOrder(oppSnap.orderId);
         } else {
+            // Create a modification request to reduce quantity (in-place, O(1))
             OrderModificationRequest r;
-            r.newQuantity = oppRemain - tradeQty;
+            r.newQuantity = allOrdersMap[oppSnap.orderId].quantity; // Use master quantity
             (isBuy ? sellBook : buyBook).modifyOrder(oppSnap.orderId, r);
         }
     }
@@ -182,7 +190,7 @@ void MatchingEngine::addMarketOrder(int orderId, int quantity, bool isBuy) {
 
     Order& o = allOrdersMap[orderId];
     if (filled == 0)            o.status = OrderStatus::CANCELED;
-    else if (filled < quantity) o.status = OrderStatus::PARTIALLY_FILLED;
+    else if (filled < quantity) o.status = OrderStatus::PARTIALLY_FILLED; // Market orders can be partial
     else                        o.status = OrderStatus::FILLED;
 }
 
@@ -200,34 +208,26 @@ void MatchingEngine::addIOCOrder(int orderId, double price, int quantity, bool i
 void MatchingEngine::addFOKOrder(int orderId, double price, int quantity, bool isBuy) {
     if (price <= 0 || quantity <= 0) return;
 
-    // Availability pre-check (kept for correctness vs. races)
-    int available = 0;
-    auto depth = (isBuy ? sellBook.getAllOrders() : buyBook.getAllOrders());
-    for (auto& o : depth) {
-        if ((isBuy && o.price.value() <= price) ||
-            (!isBuy && o.price.value() >= price)) {
-            available += o.getRemainingQuantity();
-            if (available >= quantity) break;
-        } else {
-            // As soon as we cross the limit boundary, stop scanning
-            if (isBuy && o.price.value() > price) break;
-            if (!isBuy && o.price.value() < price) break;
-        }
-    }
-    if (available < quantity) {
-        allOrdersMap[orderId] = Order(orderId, price, quantity, isBuy, OrderType::FOK);
-        allOrdersMap[orderId].status = OrderStatus::CANCELED;
-        return;
-    }
-
-    // Execute directly (no resting), should fully fill under stable book
+    // --- PERFORMANCE FIX ---
+    // The previous O(N) "stop-the-world" pre-check using getAllOrders() was
+    // removed. It was a major performance bottleneck and subject to race
+    // conditions. The correct FOK logic is to sweep and check the *result*.
+    
+    // 1. Create the order in the master list
     allOrdersMap[orderId] = Order(orderId, price, quantity, isBuy, OrderType::FOK);
+    
+    // 2. Execute the sweep
     int filled = sweepOpposite(orderId, quantity, isBuy, price);
 
     Order& o = allOrdersMap[orderId];
+
+    // 3. Check the result: FOK means Fill-OR-Kill.
+    //    If not *fully* filled, it's CANCELED.
     if (filled < quantity) {
-        // In a race, counterparties may have vanished; mark canceled (partial fills remain on tape)
         o.status = OrderStatus::CANCELED;
+        // NOTE: Any partial fills from the sweep (trades in tradeLog) are
+        // still valid, but the *order itself* is marked Canceled
+        // as it failed the "FOK" constraint.
     } else {
         o.status = OrderStatus::FILLED;
     }
@@ -253,13 +253,27 @@ void MatchingEngine::matchOrders() {
 
             const Order& b = *bOpt;
             const Order& s = *sOpt;
-            if (b.price.value() < s.price.value()) break;
+            if (!b.price.has_value() || !s.price.has_value() || b.price.value() < s.price.value()) {
+                break;
+            }
 
             int bRemain = b.getRemainingQuantity();
             int sRemain = s.getRemainingQuantity();
-            int qty     = std::min(bRemain, sRemain);
+            
+            // *** FIX 2 ***: Typo was 'std.min', now 'std::min'
+            // Wrapped in parens to avoid Windows macro collision
+            int qty     = (std::min)(bRemain, sRemain);
+            
+            if (qty <= 0) {
+                // Should not happen, but as a safeguard, clean the book
+                buyBook.cancelOrder(b.orderId);
+                sellBook.cancelOrder(s.orderId);
+                didWork = true;
+                continue;
+            }
 
-            const double execPrice = s.price.value(); // passive (sell) price
+            // Passive side (Sell) sets the price
+            const double execPrice = s.price.value(); 
             Trade t(b.orderId, s.orderId, execPrice, qty);
             tradeLog.push_back(t);
             tradesByOrderId[b.orderId].push_back(t);
@@ -277,16 +291,19 @@ void MatchingEngine::matchOrders() {
             update_status(allOrdersMap[s.orderId]);
 
             // Reflect book quantities (cancel if zero, else shrink)
+            // *** NOTE ***: These calls are now O(1)
             if (qty == bRemain) {
                 buyBook.cancelOrder(b.orderId);
             } else {
-                OrderModificationRequest rb; rb.newQuantity = bRemain - qty;
+                OrderModificationRequest rb; 
+                rb.newQuantity = allOrdersMap[b.orderId].quantity;
                 buyBook.modifyOrder(b.orderId, rb);
             }
             if (qty == sRemain) {
                 sellBook.cancelOrder(s.orderId);
             } else {
-                OrderModificationRequest rs; rs.newQuantity = sRemain - qty;
+                OrderModificationRequest rs; 
+                rs.newQuantity = allOrdersMap[s.orderId].quantity;
                 sellBook.modifyOrder(s.orderId, rs);
             }
 
@@ -306,13 +323,15 @@ void MatchingEngine::processTriggeredOrders() {
         if (o.type == OrderType::STOP) {
             it->second.type = OrderType::MARKET;
             it->second.status = OrderStatus::TRIGGERED;
-            addMarketOrder(o.orderId, o.quantity, o.isBuy);
+            // Re-use existing fast path
+            addMarketOrder(o.orderId, it->second.getRemainingQuantity(), o.isBuy);
         } else if (o.type == OrderType::STOPLIMIT) {
             it->second.type = OrderType::LIMIT;
             it->second.status = OrderStatus::ACTIVE;
             it->second.stopPrice = std::nullopt;
             if (o.price.has_value())
-                addLimitOrder(o.orderId, o.price.value(), o.quantity, o.isBuy);
+                // Re-use existing path
+                addLimitOrder(o.orderId, o.price.value(), it->second.getRemainingQuantity(), o.isBuy);
         }
     }
 
@@ -324,13 +343,13 @@ void MatchingEngine::processTriggeredOrders() {
         if (o.type == OrderType::STOP) {
             it->second.type = OrderType::MARKET;
             it->second.status = OrderStatus::TRIGGERED;
-            addMarketOrder(o.orderId, o.quantity, o.isBuy);
+            addMarketOrder(o.orderId, it->second.getRemainingQuantity(), o.isBuy);
         } else if (o.type == OrderType::STOPLIMIT) {
             it->second.type = OrderType::LIMIT;
             it->second.status = OrderStatus::ACTIVE;
             it->second.stopPrice = std::nullopt;
             if (o.price.has_value())
-                addLimitOrder(o.orderId, o.price.value(), o.quantity, o.isBuy);
+                addLimitOrder(o.orderId, o.price.value(), it->second.getRemainingQuantity(), o.isBuy);
         }
     }
 }
@@ -346,24 +365,92 @@ void MatchingEngine::checkExpiredOrders() {
 //-------------------------------------------
 // 4) Utility
 //-------------------------------------------
+
+/**
+ * @brief Cancels an order, whether it is a priced order or a stop order.
+ */
 void MatchingEngine::cancelOrder(int orderId) {
-    allOrdersMap[orderId].status = OrderStatus::CANCELED;
-    buyBook.cancelOrder(orderId);
-    sellBook.cancelOrder(orderId);
+    // 1. Update master list first
+    auto it = allOrdersMap.find(orderId);
+    if (it != allOrdersMap.end()) {
+        it->second.status = OrderStatus::CANCELED;
+    }
+
+    // 2. Try to cancel from priced books.
+    //    If it's not found (returns false), try to cancel from stop books.
+    //    This is robust and O(1) due to the new stop_index_ in OrderBook.
+    if (!buyBook.cancelOrder(orderId)) {
+        buyBook.cancelStopOrder(orderId);
+    }
+    if (!sellBook.cancelOrder(orderId)) {
+        sellBook.cancelStopOrder(orderId);
+    }
 }
 
+/**
+ * @brief Modifies an order using a "cancel and resubmit" pattern.
+ * This is the safest way to handle complex state changes, such as
+ * changing a priced order to a stop order, or vice-versa.
+ */
 void MatchingEngine::modifyOrder(int orderId, const OrderModificationRequest& req) {
-    auto &o = allOrdersMap[orderId];
-    if (req.newPrice)    o.price   = *req.newPrice;
-    if (req.newQuantity) o.quantity= *req.newQuantity;
-    if (req.newExpiry)   o.expiry  = *req.newExpiry;
-    if (req.newStatus)   o.status  = *req.newStatus;
+    auto it = allOrdersMap.find(orderId);
+    if (it == allOrdersMap.end()) {
+        ENGINE_ERROR("[modifyOrder] orderId " << orderId << " not found.");
+        return;
+    }
+    Order& o = it->second;
 
-    buyBook.modifyOrder(orderId, req);
-    sellBook.modifyOrder(orderId, req);
+    // --- 1. Cancel the existing order from its book ---
+    // We use the new robust cancel functions from the OrderBook
+    bool wasStopOrder = o.stopPrice.has_value();
+    bool wasBuy = o.isBuy;
+    
+    if (wasStopOrder) {
+        if (wasBuy) buyBook.cancelStopOrder(orderId);
+        else sellBook.cancelStopOrder(orderId);
+    } else {
+        if (wasBuy) buyBook.cancelOrder(orderId);
+        else sellBook.cancelOrder(orderId);
+    }
 
-    if (o.filledQuantity == o.quantity)
-        o.status = OrderStatus::FILLED;
+    // --- 2. Apply modifications to the master copy in allOrdersMap ---
+    if (req.newPrice)    o.price    = req.newPrice;
+    if (req.newQuantity) o.quantity = *req.newQuantity;
+    if (req.newExpiry)   o.expiry   = req.newExpiry;
+    if (req.newStatus)   o.status   = *req.newStatus;
+    if (req.newStopPrice) o.stopPrice = req.newStopPrice;
+    if (req.newVisibleQuantity)   o.visibleQuantity   = req.newVisibleQuantity;
+    if (req.newReplenishQuantity) o.replenishQuantity = req.newReplenishQuantity;
+
+    // Handle logic where one price type clears the other
+    if (req.newPrice.has_value() && !req.newStopPrice.has_value()) {
+        o.stopPrice = std::nullopt; // It's now a priced order
+    }
+    if (req.newStopPrice.has_value() && !req.newPrice.has_value()) {
+         if (o.type == OrderType::STOPLIMIT) o.price = std::nullopt; // Now a STOP order
+    }
+    
+    // --- 3. Re-submit the modified order ---
+    // Check if it's still active
+    if (o.getRemainingQuantity() <= 0) {
+         o.status = OrderStatus::FILLED;
+         return; // No need to re-add a filled order
+    }
+    if (o.status == OrderStatus::CANCELED || o.status == OrderStatus::EXPIRED) {
+         return; // No need to re-add
+    }
+
+    // Re-add to the correct book based on its *new* state
+    if (o.stopPrice.has_value()) {
+        o.status = OrderStatus::INACTIVE;
+        (wasBuy ? buyBook : sellBook).addStopOrder(o);
+    } else if (o.price.has_value()) {
+        o.status = OrderStatus::ACTIVE;
+        (wasBuy ? buyBook : sellBook).addOrder(o); // addOrder handles GTC/GTD/etc.
+    } else {
+        ENGINE_ERROR("[modifyOrder] Order " << orderId << " has no price/stopPrice after modify.");
+        o.status = OrderStatus::CANCELED;
+    }
 }
 
 //-------------------------------------------

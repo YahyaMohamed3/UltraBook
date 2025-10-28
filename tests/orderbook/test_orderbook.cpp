@@ -68,20 +68,35 @@ TEST_F(OrderBookTest, ClearBook) {
     EXPECT_FALSE(buyBook.findOrder(8).has_value());
 }
 
-// 3. ModifyOrder: price-time priority & repositioning
-TEST_F(OrderBookTest, ModifyOrder_Reposition) {
-    buyBook.addOrder({9,  {10.0}, 5, true, OrderType::LIMIT});
-    buyBook.addOrder({10, {20.0}, 5, true, OrderType::LIMIT});
-    OrderModificationRequest req;
-    req.newPrice = 30.0;
-    req.newQuantity = 8;
-    buyBook.modifyOrder(9, req);
+// 3. ModifyOrder: NOW ONLY TESTS IN-PLACE UPDATES (e.g., quantity)
+//    (Price change/reposition logic moved to engine tests)
+TEST_F(OrderBookTest, SameLevel_FIFO_NoRequeueOnDecrease) {
+    // BUY side, single level @100: id 1001 then 1002
+    buyBook.addOrder({1001, 100.0, 5, true, OrderType::LIMIT});
+    buyBook.addOrder({1002, 100.0, 5, true, OrderType::LIMIT});
+
     auto best = buyBook.getBestOrder();
     ASSERT_TRUE(best.has_value());
-    EXPECT_EQ(best->orderId, 9);
-    EXPECT_DOUBLE_EQ(best->price.value(), 30.0);
-    EXPECT_EQ(best->quantity, 8);
+    EXPECT_EQ(best->orderId, 1001); // first-in at best level
+
+    // Decrease qty of head; should NOT requeue
+    OrderModificationRequest m; m.newQuantity = 4;
+    buyBook.modifyOrder(1001, m);
+
+    best = buyBook.getBestOrder();
+    ASSERT_TRUE(best.has_value());
+    EXPECT_EQ(best->orderId, 1001); // still head of the FIFO
+
+    // Check quantity updated
+    auto ptr = buyBook.findOrder(1001);
+    ASSERT_TRUE(ptr.has_value());
+    EXPECT_EQ((*ptr)->quantity, 4);
 }
+
+// --- Test ModifyOrder_Reposition REMOVED ---
+// --- Test RequeueOnPriceChange_GoesToBackAtNewLevel REMOVED ---
+// Reason: This logic is now correctly handled by the MatchingEngine's
+// cancel+resubmit pattern, not by OrderBook::modifyOrder.
 
 // 4. GTD expiration
 TEST_F(OrderBookTest, GTDExpiration_Removes) {
@@ -109,12 +124,14 @@ TEST_F(OrderBookTest, StopLimit_Conversion_HandOff) {
 TEST_F(OrderBookTest, ExpiredStopRemoval) {
     auto expiry = std::chrono::system_clock::now() + 10ms;
     Order s{13, std::nullopt, 1, false, OrderType::STOP, expiry, 50.0};
-    buyBook.addStopOrder(s);
+    // Use sellBook for this test to ensure side doesn't matter for stop expiry
+    sellBook.addStopOrder(s);
     std::this_thread::sleep_for(20ms);
-    buyBook.removeExpiredStopOrders();
-    auto all = buyBook.getAllOrders();
+    sellBook.removeExpiredStopOrders();
+    auto all = sellBook.getAllOrders();
     EXPECT_TRUE(std::none_of(all.begin(), all.end(), [](auto &o){ return o.orderId == 13; }));
 }
+
 
 TEST_F(OrderBookTest, MultipleStopsTriggeredTogether) {
     Order s1{21, std::nullopt, 1, true, OrderType::STOP, std::nullopt, 10.0};
@@ -132,29 +149,40 @@ TEST_F(OrderBookTest, MultipleStopsTriggeredTogether) {
 TEST_F(OrderBookTest, Iceberg_Replenish) {
     Order ib{14, {20.0}, 100, true, OrderType::ICE, std::nullopt, std::nullopt, 10, 10};
     buyBook.addOrder(ib);
-    // simulate visible depletion
-    OrderModificationRequest r; r.newQuantity = 0;
-    buyBook.modifyOrder(14, r);
+    
+    // Simulate visible depletion by directly modifying the order via pointer
     auto ptr = buyBook.findOrder(14);
     ASSERT_TRUE(ptr.has_value());
-    buyBook.replenishIcebergOrder(*ptr); // pass real pointer from findOrder()
+    (*ptr)->visibleQuantity = 0; // Simulate depletion
+
+    buyBook.replenishIcebergOrder(*ptr); // Replenish
+
+    // Re-fetch to check
     ptr = buyBook.findOrder(14);
     ASSERT_TRUE(ptr.has_value());
     EXPECT_EQ((*ptr)->visibleQuantity.value(), 10);
 }
 
+
 TEST_F(OrderBookTest, IcebergPartialReplenish) {
     Order ib{23, {30.0}, 3, true, OrderType::ICE, std::nullopt, std::nullopt, 2, 2};
     buyBook.addOrder(ib);
-    OrderModificationRequest r; r.newQuantity = 1; // only 1 remaining
-    buyBook.modifyOrder(23, r);
+
+    // Simulate partial fill leaving only 1 total quantity remaining
     auto ptr = buyBook.findOrder(23);
     ASSERT_TRUE(ptr.has_value());
-    buyBook.replenishIcebergOrder(*ptr);
+    (*ptr)->filledQuantity = 2; // 2 filled
+    (*ptr)->visibleQuantity = 0; // Visible depleted
+
+    buyBook.replenishIcebergOrder(*ptr); // Try to replenish
+
+    // Re-fetch to check
     ptr = buyBook.findOrder(23);
     ASSERT_TRUE(ptr.has_value());
+    // Should replenish only the remaining amount (1), not the full replenishQty (2)
     EXPECT_EQ((*ptr)->visibleQuantity.value(), 1);
 }
+
 
 // 7. getAllOrders consistency (both price and stops)
 TEST_F(OrderBookTest, GetAllOrders_ContainsBothPriceAndStops) {
@@ -173,13 +201,17 @@ TEST_F(OrderBookTest, TriggeredStopMarketOrder_HandOff) {
     Order s{20, std::nullopt, 10, true, OrderType::STOP, std::nullopt, 55.0};
     buyBook.addStopOrder(s);
     buyBook.checkAndTrigger(56.0); // should trigger
-    EXPECT_FALSE(buyBook.findOrder(20).has_value());
+    // Stop order should be gone from the stop book
+    auto all_stops = buyBook.getAllOrders(); // Check via getAllOrders as findOrder only checks price book
+    EXPECT_TRUE(std::none_of(all_stops.begin(), all_stops.end(), [](auto& o){ return o.orderId == 20 && o.stopPrice.has_value(); }));
+
     auto triggered = buyBook.getAndClearTriggeredOrders();
     ASSERT_EQ(triggered.size(), 1);
     EXPECT_EQ(triggered[0].orderId, 20);
     EXPECT_EQ(triggered[0].type, OrderType::STOP); // book does not transition type
     EXPECT_TRUE(buyBook.getAndClearTriggeredOrders().empty());
 }
+
 
 // 9. After clear, adding works
 TEST_F(OrderBookTest, AddAfterClearWorks) {
@@ -221,43 +253,7 @@ TEST_F(OrderBookTest, BestCache_RecomputesOnHeadErase) {
 }
 
 
-// FIFO within a single level: decrease quantity does NOT requeue
-TEST_F(OrderBookTest, SameLevel_FIFO_NoRequeueOnDecrease) {
-    // BUY side, single level @100: id 1001 then 1002
-    buyBook.addOrder({1001, 100.0, 5, true, OrderType::LIMIT});
-    buyBook.addOrder({1002, 100.0, 5, true, OrderType::LIMIT});
-
-    auto best = buyBook.getBestOrder();
-    ASSERT_TRUE(best.has_value());
-    EXPECT_EQ(best->orderId, 1001); // first-in at best level
-
-    // Decrease qty of head; should NOT requeue
-    OrderModificationRequest m; m.newQuantity = 4;
-    buyBook.modifyOrder(1001, m);
-
-    best = buyBook.getBestOrder();
-    ASSERT_TRUE(best.has_value());
-    EXPECT_EQ(best->orderId, 1001); // still head of the FIFO
-}
-
-// Price change requeues to the BACK of the new level
-TEST_F(OrderBookTest, RequeueOnPriceChange_GoesToBackAtNewLevel) {
-    // Make a target level (101) with an existing order to compare position
-    buyBook.addOrder({2001, 100.0, 1, true, OrderType::LIMIT});
-    buyBook.addOrder({2002, 100.0, 1, true, OrderType::LIMIT});
-    buyBook.addOrder({3000, 101.0, 1, true, OrderType::LIMIT}); // existing at new level
-
-    // Move 2001 to 101.0: should appear AFTER 3000 in that level
-    OrderModificationRequest m; m.newPrice = 101.0;
-    buyBook.modifyOrder(2001, m);
-
-    // Best is 101.0 level; the head there must be 3000 (not requeued 2001)
-    auto best = buyBook.getBestOrder();
-    ASSERT_TRUE(best.has_value());
-    EXPECT_EQ(best->orderId, 3000);
-}
-
-// Inferior insert must NOT change the best-of-book
+// 12. Inferior insert must NOT change the best-of-book
 TEST_F(OrderBookTest, BestCache_NotChangedOnInferiorInsert) {
     buyBook.addOrder({4001, 105.0, 1, true, OrderType::LIMIT}); // best
     auto b1 = buyBook.getBestOrder();
@@ -270,7 +266,7 @@ TEST_F(OrderBookTest, BestCache_NotChangedOnInferiorInsert) {
     EXPECT_EQ(b2->orderId, 4001); // unchanged
 }
 
-// SELL-side stops: trigger when lastPrice <= stop (inclusive)
+// 13. SELL-side stops: trigger when lastPrice <= stop (inclusive)
 TEST_F(OrderBookTest, SellSideStops_TriggerAtOrBelow) {
     OrderBook sellOnly{OrderBook::Side::SELL};
     Order s1{5001, std::nullopt, 1, false, OrderType::STOP, std::nullopt, 100.0};
@@ -284,4 +280,49 @@ TEST_F(OrderBookTest, SellSideStops_TriggerAtOrBelow) {
     ASSERT_EQ(trig.size(), 2u);
     std::unordered_set<int> ids; for (auto& o : trig) ids.insert(o.orderId);
     EXPECT_TRUE(ids.count(5001) && ids.count(5002));
+}
+
+// 14. BUY-side stops: trigger when lastPrice >= stop (inclusive)
+// Added for completeness
+TEST_F(OrderBookTest, BuySideStops_TriggerAtOrAbove) {
+    OrderBook buyOnly{OrderBook::Side::BUY};
+    Order s1{6001, std::nullopt, 1, true, OrderType::STOP, std::nullopt, 200.0};
+    Order s2{6002, std::nullopt, 1, true, OrderType::STOP, std::nullopt, 200.0};
+    Order s3{6003, std::nullopt, 1, true, OrderType::STOP, std::nullopt, 201.0}; // Higher stop
+    buyOnly.addStopOrder(s1);
+    buyOnly.addStopOrder(s2);
+    buyOnly.addStopOrder(s3);
+
+    // lastPrice exactly at 200 should trigger s1 and s2
+    buyOnly.checkAndTrigger(200.0);
+    auto trig1 = buyOnly.getAndClearTriggeredOrders();
+    ASSERT_EQ(trig1.size(), 2u);
+    std::unordered_set<int> ids1; for (auto& o : trig1) ids1.insert(o.orderId);
+    EXPECT_TRUE(ids1.count(6001) && ids1.count(6002));
+    EXPECT_FALSE(ids1.count(6003));
+
+    // lastPrice rising to 201 should trigger s3
+    buyOnly.checkAndTrigger(201.0);
+    auto trig2 = buyOnly.getAndClearTriggeredOrders();
+     ASSERT_EQ(trig2.size(), 1u);
+     EXPECT_EQ(trig2[0].orderId, 6003);
+}
+
+// 15. Cancel Stop Order test
+TEST_F(OrderBookTest, CancelStopOrder) {
+    Order s1{7001, std::nullopt, 1, true, OrderType::STOP, std::nullopt, 10.0};
+    buyBook.addStopOrder(s1);
+    
+    // Check it's in the stop book via getAllOrders
+    auto all1 = buyBook.getAllOrders();
+    EXPECT_TRUE(std::any_of(all1.begin(), all1.end(), [](auto&o){ return o.orderId == 7001; }));
+
+    EXPECT_TRUE(buyBook.cancelStopOrder(7001));
+
+    // Check it's gone
+    auto all2 = buyBook.getAllOrders();
+    EXPECT_TRUE(std::none_of(all2.begin(), all2.end(), [](auto&o){ return o.orderId == 7001; }));
+
+    // Cancel non-existent should fail
+    EXPECT_FALSE(buyBook.cancelStopOrder(9999));
 }

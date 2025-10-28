@@ -48,6 +48,13 @@ protected:
         for (const auto& o : snap) if (o.orderId == id) return {true, o.price};
         return {false, std::optional<double>{}};
     }
+
+    // Helper to find quantity
+    static std::optional<int>
+    findQtyInSnapshot(const std::vector<Order>& snap, int id) {
+        for (const auto& o : snap) if (o.orderId == id) return o.quantity;
+        return std::nullopt;
+    }
 };
 
 // 1) Parallel adds to disjoint price levels (minimal contention)
@@ -118,24 +125,26 @@ TEST_F(OrderBookConcurrencyTest, ParallelAdds_SameLevel) {
     EXPECT_EQ(ids.size(), all.size());
 }
 
-// 3) Readers hammer find/getBest while a writer modifies a hot order’s price (no deadlocks)
+// 3) Readers hammer find/getBest while a writer modifies a hot order’s QUANTITY (no deadlocks)
 TEST_F(OrderBookConcurrencyTest, ReadersVsWriter_ModifyHotOrder) {
-    for (int i = 0; i < 1000; ++i)
-        buyBook.addOrder({i + 1, 100.0 + (i % 10), 1, true, OrderType::LIMIT});
+    // --- THIS TEST HAS BEEN MODIFIED ---
+    // It no longer tests price changes (which are handled by engine-level
+    // cancel+resubmit). Instead, it tests the in-place quantity modification
+    // path, which is what the engine uses for partial fills.
+    // This test should now be extremely fast.
 
+    // Start with one order with a large quantity
+    buyBook.addOrder({777, 110.0, 1000, true, OrderType::LIMIT});
     const int hotId = 777;
-    {
-        auto snap = buyBook.getAllOrders();
-        auto [found, _] = findInSnapshot(snap, hotId);
-        if (!found) buyBook.addOrder({hotId, 110.0, 1, true, OrderType::LIMIT});
-    }
 
     std::atomic<bool> run{true};
     std::thread writer([&]{
         OrderModificationRequest r1, r2;
-        r1.newPrice = 150.0;
-        r2.newPrice = 110.0;
-        for (int k = 0; k < 50'000; ++k)
+        r1.newQuantity = 500; // Decrease qty
+        r2.newQuantity = 250; // Decrease qty
+        // Loop a large number of times to test in-place modification
+        // Increased loop count as this is now very fast
+        for (int k = 0; k < 200'000; ++k) 
             buyBook.modifyOrder(hotId, (k & 1) ? r1 : r2);
         run.store(false, std::memory_order_release);
     });
@@ -155,11 +164,11 @@ TEST_F(OrderBookConcurrencyTest, ReadersVsWriter_ModifyHotOrder) {
     writer.join();
     for (auto& t : readers) t.join();
 
+    // Check the final *quantity*
     const auto snap = buyBook.getAllOrders();
-    auto [found, px] = findInSnapshot(snap, hotId);
-    ASSERT_TRUE(found);
-    ASSERT_TRUE(px.has_value());
-    EXPECT_TRUE(*px == 150.0 || *px == 110.0);
+    auto qty = findQtyInSnapshot(snap, hotId);
+    ASSERT_TRUE(qty.has_value());
+    EXPECT_TRUE(*qty == 500 || *qty == 250);
 }
 
 // 4) Concurrent cancel after bulk insert (ensures no deadlocks, consistent remainder)
@@ -228,8 +237,11 @@ TEST_F(OrderBookConcurrencyTest, IdMapStress_ModifyCancel) {
     std::thread mods([&]{
         for (int i = 0; i < N; ++i) {
             OrderModificationRequest r;
-            if ((i % 3) == 0) r.newPrice = 60.0 + (i % 50); // move across levels
-            if ((i % 5) == 0) r.newQuantity = 1;            // decrease qty (no requeue)
+            // NOTE: newPrice is ignored by the new modifyOrder,
+            // which is correct behavior (engine handles re-queue).
+            // This test now just stresses in-place mods and cancels.
+            if ((i % 3) == 0) r.newPrice = 60.0 + (i % 50); // This part will be ignored
+            if ((i % 5) == 0) r.newQuantity = 1;           // This part will be applied
             buyBook.modifyOrder(200'000 + i, r);
         }
         run.store(false, std::memory_order_release);

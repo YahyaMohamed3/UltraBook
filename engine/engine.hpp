@@ -12,6 +12,7 @@ namespace ultraBook {
 
 class MatchingEngine {
 public:
+    
     MatchingEngine();
 
     // 1) Order submission methods
@@ -42,6 +43,9 @@ public:
     OrderStatus getOrderStatus(int orderId) const;
     void printOrderBook() const;
     void printTradelog() const;
+    const OrderBook& getBuyBook() const { return buyBook; }
+    const OrderBook& getSellBook() const { return sellBook; }
+    const std::vector<Trade>& getTradeLog() const { return tradeLog; }
 
 private:
     void refreshLastPriceFromBook();
